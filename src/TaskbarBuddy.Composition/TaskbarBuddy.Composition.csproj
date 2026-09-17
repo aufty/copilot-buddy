@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows10.0.22000.0</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <CopilotSkipCliDownload>true</CopilotSkipCliDownload>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\TaskbarBuddy.Core\TaskbarBuddy.Core.csproj" />
+    <ProjectReference Include="..\TaskbarBuddy.Copilot\TaskbarBuddy.Copilot.csproj" />
+    <Content Include="Assets\Sprites\buddy.png" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="Assets\Sprites\present.png" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="Assets\Fonts\*" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="presentation.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

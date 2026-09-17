@@ -1,0 +1,53 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Verify Copilot attachment authentication",
+			"type": "shell",
+			"command": "$ErrorActionPreference = 'Stop'\n$attached = Get-ChildItem (Join-Path $env:LOCALAPPDATA 'TaskbarBuddy/connections/*.json') | Sort-Object LastWriteTime -Descending | ForEach-Object { Get-Content $_.FullName -Raw | ConvertFrom-Json } | Where-Object { $_.stage -eq 'attached' -and $_.port -and (Get-Process -Id $_.processId -ErrorAction SilentlyContinue) } | Select-Object -First 1\nif (-not $attached) { throw 'No live successful attachment diagnostic exists.' }\n& 'C:/Program Files/dotnet/dotnet.exe' run --file tools/Test-CopilotAuthentication.cs -- $attached.port\nexit $LASTEXITCODE",
+			"options": {
+				"cwd": "${workspaceFolder}"
+			},
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Try Copilot attachment once",
+			"type": "shell",
+			"command": "$ErrorActionPreference = 'Stop'\nif (Get-Process -Name TaskbarBuddy.Composition -ErrorAction SilentlyContinue) { throw 'Exit the running buddy before this one-shot launch.' }\n$buddy = Start-Process -FilePath './artifacts/attach-fix/TaskbarBuddy.Composition.exe' -ArgumentList '--open-copilot' -WorkingDirectory $PWD.Path -PassThru\nif (-not $buddy.WaitForInputIdle(10000)) { throw 'Buddy UI did not become ready.' }\nWrite-Host ('Started buddy PID ' + $buddy.Id + ' with one Copilot launch requested.')",
+			"options": {
+				"cwd": "${workspaceFolder}"
+			},
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Inspect Copilot connection authentication",
+			"type": "shell",
+			"command": "$ErrorActionPreference = 'Stop'\n$package = Join-Path $env:LOCALAPPDATA 'copilot/pkg/win32-arm64/1.0.86-2'\n$text = [IO.File]::ReadAllText((Join-Path $package 'sea-loader.js'))\nforeach ($term in @('async function gh', 'async function yh')) {\n    $index = $text.IndexOf($term, [StringComparison]::Ordinal)\n    if ($index -lt 0) { throw ('Missing loader function: ' + $term) }\n    $excerpt = $text.Substring($index, [Math]::Min(2000, $text.Length - $index))\n    for ($chunk = 0; $chunk -lt $excerpt.Length; $chunk += 180) { Write-Output $excerpt.Substring($chunk, [Math]::Min(180, $excerpt.Length - $chunk)) }\n}",
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Build Copilot attachment fix",
+			"type": "shell",
+			"command": "$ErrorActionPreference = 'Stop'\n$outputExe = [IO.Path]::GetFullPath('artifacts/attach-fix/TaskbarBuddy.Composition.exe')\nGet-Process -Name TaskbarBuddy.Composition -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $outputExe } | ForEach-Object {\n    Write-Host ('Stopping build-output buddy PID ' + $_.Id)\n    $_.Kill()\n    if (-not $_.WaitForExit(5000)) { throw 'Buddy did not exit; build cancelled.' }\n}\n& 'C:\\Program Files\\dotnet\\dotnet.exe' build src/TaskbarBuddy.Composition --no-restore -o artifacts/attach-fix\nexit $LASTEXITCODE",
+			"options": {
+				"cwd": "${workspaceFolder}"
+			},
+			"isBackground": false,
+			"problemMatcher": [
+				"$msCompile"
+			]
+		},
+		{
+			"label": "Test buddy core",
+			"type": "shell",
+			"command": "& 'C:/Program Files/dotnet/dotnet.exe' test tests/TaskbarBuddy.Core.Tests --no-restore",
+			"isBackground": false,
+			"problemMatcher": [
+				"$msCompile"
+			]
+		}
+	]
+}

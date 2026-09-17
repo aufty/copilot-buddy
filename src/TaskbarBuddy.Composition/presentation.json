@@ -1,0 +1,48 @@
+{
+  "sprite": {
+    "path": "Assets/Sprites/buddy.png",
+    "scale": 2,
+    "frames": {
+      "standing": { "x": 0, "y": 0, "width": 14, "height": 20 },
+      "walkLeft1": { "x": 14, "y": 0, "width": 14, "height": 20 },
+      "walkLeft2": { "x": 28, "y": 0, "width": 14, "height": 20 },
+      "walkRight1": { "x": 42, "y": 0, "width": 14, "height": 20 },
+      "walkRight2": { "x": 56, "y": 0, "width": 14, "height": 20 },
+      "wave1": { "x": 70, "y": 0, "width": 14, "height": 20 },
+      "wave2": { "x": 84, "y": 0, "width": 14, "height": 20 }
+    }
+  },
+  "wander": {
+    "speed": 80,
+    "idleMinimumSeconds": 1.5,
+    "idleMaximumSeconds": 4,
+    "preferredMinimumMove": 96,
+    "walkFrameSeconds": 0.2
+  },
+  "breathing": {
+    "durationSeconds": 2.2,
+    "amount": 0.035
+  },
+  "physics": {
+    "dragResponseSeconds": 0.09,
+    "gravity": 1600,
+    "maximumReleaseSpeed": 1100,
+    "wallRestitution": 0.4,
+    "landingDurationSeconds": 0.38,
+    "maximumLandingSquish": 0.22
+  },
+  "attention": {
+    "hopHeight": 10,
+    "hopDurationSeconds": 0.7,
+    "waveFrameSeconds": 0.25,
+    "reducedMotion": false,
+    "reducedMotionWaveFrameSeconds": 0.5
+  },
+  "bubble": {
+    "minimumWidth": 160,
+    "maximumWidth": 360,
+    "maximumHeight": 220,
+    "padding": 14
+  },
+  "pipeName": "TaskbarBuddy.Presentation.v1"
+}
