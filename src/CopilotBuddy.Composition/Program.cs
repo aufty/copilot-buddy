@@ -429,6 +429,17 @@ internal sealed partial class ReplayWindow : Form
         StartBreathing();
     }
 
+    private Vector3 InterruptPassiveMotion()
+    {
+        passiveTimer.Stop();
+        Vector3 renderedPosition = CurrentRenderedBuddyOffset();
+        activePassiveMotion = null;
+        controller!.PlaceAt(renderedPosition.X / dpiScale);
+        sprite!.StopAnimation(nameof(sprite.Offset));
+        sprite.Offset = PositionOf(controller.Snapshot);
+        return sprite.Offset;
+    }
+
     private void StartWalkingFrames(bool left)
     {
         SpriteFrame first = left ? SpriteFrame.WalkLeft1 : SpriteFrame.WalkRight1;

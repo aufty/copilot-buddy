@@ -599,11 +599,9 @@ internal sealed partial class ReplayWindow
 
         InterruptSupplyMotionForSkill();
         AdvanceModel();
-        controller.ResetWandering();
+        InterruptPassiveMotion();
         StopAttentionBounce();
         StopSessionLaunchJump();
-        passiveTimer.Stop();
-        sprite.StopAnimation(nameof(sprite.Offset));
         sprite.StopAnimation(nameof(sprite.Scale));
         sprite.Scale = Vector3.One;
         ShowFrame(SpriteFrame.Wave1);
@@ -671,14 +669,12 @@ internal sealed partial class ReplayWindow
 
         AdvanceModel();
         InterruptSupplyMotionForSkill();
+        Vector3 start = InterruptPassiveMotion();
         StopAttentionBounce();
         StopSessionLaunchJump();
         StopHandoffWindowJump();
-        passiveTimer.Stop();
-        sprite.StopAnimation(nameof(sprite.Offset));
         sprite.StopAnimation(nameof(sprite.Scale));
         sprite.Scale = Vector3.One;
-        Vector3 start = PositionOf(controller.Snapshot);
         Point startScreen = PointToScreen(new Point((int)Math.Round(start.X), (int)Math.Round(start.Y)));
 
         Rectangle virtualScreen = SystemInformation.VirtualScreen;
