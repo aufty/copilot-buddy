@@ -136,9 +136,14 @@ internal static class ContextPressureSmoke
             Focused.Add(sessionId);
             return Task.FromResult(CanFocus);
         }
+        public Task<AssistantGatherResult> GatherAsync(
+            AssistantWindowBounds workArea,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(new AssistantGatherResult([]));
         public Task<AssistantSessionTarget?> CaptureSessionTargetAsync(CancellationToken cancellationToken) =>
             Task.FromResult<AssistantSessionTarget?>(null);
         public Task<AssistantPromptInjection?> InjectPromptAsync(
+            AssistantSessionTarget target,
             string prompt,
             CancellationToken cancellationToken) =>
             Task.FromResult<AssistantPromptInjection?>(null);

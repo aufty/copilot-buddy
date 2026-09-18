@@ -6,9 +6,9 @@ Copilot Buddy is a .NET 10 Windows Composition desktop companion that wanders al
 
 - Windows 11
 - .NET 10 SDK 10.0.401 or a later .NET 10 feature band
-- The seven-frame sprite sheet at `src/CopilotBuddy.Composition/Assets/Sprites/buddy.png`
+- At least one seven-frame sprite sheet in `src/CopilotBuddy.Composition/Assets/Sprites/Buddies`
 
-The supplied sprite sheet is a horizontal 98x20 PNG with seven 14x20 frames in this order: standing, walk left 1, walk left 2, walk right 1, walk right 2, wave 1, wave 2. Frame rectangles and animation/layout values are in `src/CopilotBuddy.Composition/presentation.json`. Idle breathing uses a subtle bottom-anchored squash and stretch; its duration and amount are configurable there and reduced-motion mode disables it. The configured sprite path is resolved relative to the executable.
+Buddy sprite sheets are horizontal 98x20 PNGs with seven 14x20 frames in this order: standing, walk left 1, walk left 2, walk right 1, walk right 2, wave 1, wave 2. Add a correctly sized `<buddy-name>.png` file to `src/CopilotBuddy.Composition/Assets/Sprites/Buddies` to make it available in settings; the filename becomes its display name and the top half of its standing frame becomes its avatar. Sprout is selected by default. Frame rectangles and animation/layout values are in `src/CopilotBuddy.Composition/presentation.json`. Idle breathing uses a subtle bottom-anchored squash and stretch; its duration and amount are configurable there and reduced-motion mode disables it.
 
 ## Build and test
 
@@ -47,7 +47,21 @@ With the buddy running, **Alt+Enter** summons the oldest queued Copilot CLI sess
 
 Press **Alt+Space** or right-click the buddy or its bubble to open the pixel skills menu beside the buddy. **Handoff** (**Alt+Shift+H**) captures the currently focused buddy-managed Copilot session before opening its question window, so the modal dialog cannot change the handoff target. It then asks whether the output should be a spec, research instructions, concrete implementation instructions with file and line details, or custom freeform instructions. The captured Copilot session writes a redacted handoff document to a specific unique path under the OS temporary directory.
 
-**Inquire** (**Alt+Shift+G**) injects the `grilling` skill prompt into the most recently focused buddy-managed Copilot session. The prompt makes Copilot stress-test a plan, decision, or idea as a dependency-aware design tree, asking each currently unblocked frontier of decisions as one recommended-answer round and waiting for the user's answers before expanding the tree. The buddy plays its session-launch jump and sparkle while a brief sparkle traces the injected terminal window's full border.
+**Gather** (**Alt+Shift+T**) restores and tiles every distinct terminal window controlled by Copilot Buddy into equal cells across the primary screen's working area. Buddy then hops to each tiled window in turn before returning to the taskbar. Other skills are ignored until he lands. Windows Terminal tabs that share one top-level window are gathered as one window, and unrelated terminal windows are left untouched.
+
+The menu's **Supplies** section contains a ball, food, water, and chair. One of each can be deployed at the same time; a deployed item's solid icon becomes a clickable silhouette that recalls it. Select an available item to attach it to the pointer, then click where it should fall onto the taskbar. Landed items can be picked up, caught, dragged, and thrown until Buddy physically holds or consumes them. Moving an item cancels and resets its current approach or play sequence, and redropping it places it at the end of the oldest-first supply queue.
+
+Skills take priority over an in-progress supply approach or chair transition. Buddy preserves his rendered position, performs the skill animation, then resumes pursuing the queued supply instead of teleporting or discarding the objective.
+
+When an alert hop ends as a supply becomes actionable, Buddy completes a short landing before beginning the horizontal approach. The walk never stretches a partially completed hop across the distance to the item.
+
+Copilot Buddy runs over to collect food and water. Food is lifted to his face for a three-bite "munch munch munch" animation with flying pixel crumbs. Water tilts through three "glug glug glug" sips while blue droplets spill and splash. With the ball, he plays for a randomized number of rounds, throwing it with varied strength and direction, then chasing it after its gravity-driven arc and damped taskbar bounces. Each interaction ends with a heart. Hunger, thirst, and play meters deplete independently at slightly randomized rates; the buddy asks for the lowest need in its bubble. A hidden relationship score rewards timely care and declines during prolonged neglect.
+
+After higher-priority actions and queued consumables finish, Buddy walks to a deployed chair, hops into its bucket seat, and stops autonomous wandering while needs, bubbles, alerts, reactions, and explicit actions continue. Actions that require movement make him hop out and return afterward. Dragging or throwing either Buddy or the occupied chair moves them as one unit, and he remains seated after landing. Clicking the chair silhouette hops him out, restores the chair to Supplies, and resumes wandering. Chair state is intentionally transient across restarts.
+
+Actionable Copilot alerts always take priority over supplies. A carried item, falling item, ball flight, eating/drinking animation, Buddy chase, or chair transition pauses when an alert appears and resumes only after that alert is acknowledged.
+
+**Inquire** (**Alt+Shift+G**) captures the most recently focused buddy-managed Copilot session, jumps the buddy to that terminal window, injects the `grilling` skill prompt into that exact session, then jumps back down to the taskbar. The prompt makes Copilot stress-test a plan, decision, or idea as a dependency-aware design tree, asking each currently unblocked frontier of decisions as one recommended-answer round and waiting for the user's answers before expanding the tree. The buddy sparkles while a brief sparkle traces the injected terminal window's full border.
 
 Copilot Buddy plays the same triumphant jump used when opening a session as it drops a present near its current position. The present follows a light toss arc, lands, and makes one subtle finishing skip. Presents choose from fun preset colors, with an occasional animated rainbow treatment. When the source session reports that it is done and the file is available, Copilot Buddy gracefully closes the terminal window associated with that source session and the present displays a clickable "<session> handoff ready to open" bubble. It does not delete the session through the Copilot API. Clicking the present or bubble pops it open with a small bounce away from the click and launches a fresh Copilot session instructed to continue from that exact handoff file. The present rendering and file-readiness behavior are provider-neutral; the Copilot adapter owns session prompts, completion signals, window closure, and continuation launch.
 
@@ -71,17 +85,21 @@ The replaceable policy and two-click state live in `src/CopilotBuddy.Core/Contex
 
 With the normal buddy exited, run `dotnet run --file tools/Test-ContextPressure.cs -- --windowed` for a bounded synthetic-provider UI check. It covers warning/focus behavior, alert coexistence, sweat cleanup, and recovery without launching a CLI or submitting a prompt. Small preview captures are saved under `artifacts/context-pressure`.
 
-Settings are saved to `%LOCALAPPDATA%\CopilotBuddy\settings.json` when the shortcut is changed. You can also create/edit that file and restart the buddy:
+Settings, including the selected buddy sprite, are saved to `%LOCALAPPDATA%\CopilotBuddy\settings.json`. You can also create/edit that file and restart the buddy:
 
 ```json
 {
 	"shortcut": "Alt+Enter",
+	"buddy": "sprout",
 	"workingDirectory": "C:\\source\\copilot-buddy",
-	"cliPath": null
+	"copilotLaunch": {
+		"executable": "custom-launcher",
+		"arguments": ["copilot", "--custom-option"]
+	}
 }
 ```
 
-`workingDirectory: null` uses the directory the buddy was started from. `cliPath` can specify the full path to `copilot.exe`; otherwise the adapter checks `COPILOT_CLI_PATH`, PATH, and the per-user WinGet installation. No GitHub credentials are stored in these settings. SDK connections use loopback and a random per-window connection token passed through the child environment.
+Open the pixel skills menu and select the gear at its top-right edge to choose a buddy and edit the Copilot launch command. The friendly command line is stored as a structured executable and prefix-argument array; Copilot Buddy appends its required UI-server, port, and session arguments. For example, `custom-launcher copilot --custom-option` produces the configuration above. Use `copilot` for the normal launch behavior. `workingDirectory: null` uses the directory the buddy was started from. For a normal launch, the adapter checks `COPILOT_CLI_PATH`, PATH, and the per-user WinGet installation. The legacy `cliPath` setting remains readable and is migrated when launch settings are saved. No GitHub credentials are stored in these settings. SDK connections use loopback and a random per-window connection token passed through the child environment.
 
 This version observes only CLI windows launched by the buddy, including sessions created/switched inside those windows. It does not attach to arbitrary existing terminals. Exiting the visual Copilot Buddy unregisters its shortcuts and leaves both the broker and CLI windows running, allowing the next visual process to reconnect and recover pending alerts and current context state. If attachment fails, check the CLI's first-run prompts, close that window, and reopen it through the buddy. Hidden buddies retain pending alerts, which appear when made visible again. Replay/smoke modes do not register the shortcut or launch Copilot.
 

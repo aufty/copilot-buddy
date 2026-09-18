@@ -9,7 +9,8 @@ internal sealed partial class ReplayWindow
     private readonly ContextPressure contextPressure = new();
     private ContainerVisual? contextSweat;
     private readonly List<CompositionObject> sweatResources = [];
-    private string? SessionMessage => focusWaitMessage ?? contextPressure.Message ?? attentionQueue.Current?.Message;
+    private string? SessionMessage =>
+        focusWaitMessage ?? contextPressure.Message ?? attentionQueue.Current?.Message ?? SupplyMessage;
     private bool HasSessionAction => contextPressure.Presented is not null || attentionQueue.Current is not null;
 
     private void OnContextUsageChanged(object? sender, SessionContextUsage usage) =>
@@ -25,7 +26,8 @@ internal sealed partial class ReplayWindow
         if (wasHeavy != contextPressure.IsHeavy)
         {
             UpdateContextSweat();
-            if (!dragging && !releasingDrag && controller.Snapshot.State is VisualState.Idle or VisualState.Walking)
+            if (!dragging && !releasingDrag && supplyRetrieval is null && chairHop is null &&
+                controller.Snapshot.State is VisualState.Idle or VisualState.Walking)
             {
                 StartPassiveMotion();
             }

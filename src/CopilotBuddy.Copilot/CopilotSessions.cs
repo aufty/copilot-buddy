@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.ComponentModel;
 using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
@@ -11,11 +12,12 @@ using CopilotBuddy.Core;
 
 namespace CopilotBuddy.Copilot;
 
-public sealed class CopilotSessions(string? executablePath = null) : IAssistantSessions
+public sealed class CopilotSessions : IAssistantSessions
 {
     private readonly ConcurrentDictionary<string, TerminalSession> terminals = new();
     private readonly ConcurrentDictionary<string, AssistantHandoff> pendingHandoffs = new();
     private readonly CancellationTokenSource shutdown = new();
+    private AssistantLaunchCommand launchCommand = AssistantLaunchCommand.Default;
     private string? lastOpenedTerminalIdentifier;
     private string? lastFocusedSessionKey;
     public event EventHandler<SessionAttention>? AttentionRequested;
@@ -28,6 +30,12 @@ public sealed class CopilotSessions(string? executablePath = null) : IAssistantS
     public Task OpenAsync(string workingDirectory, CancellationToken cancellationToken) =>
         Task.Run(() => Open(workingDirectory, null, null, false, cancellationToken), cancellationToken);
 
+    public void ConfigureLaunch(AssistantLaunchCommand command)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(command.Executable);
+        Volatile.Write(ref launchCommand, new(command.Executable, [.. command.Arguments ?? []]));
+    }
+
     private TerminalSession Open(
         string workingDirectory,
         string? initialPrompt,
@@ -38,7 +46,8 @@ public sealed class CopilotSessions(string? executablePath = null) : IAssistantS
         cancellationToken.ThrowIfCancellationRequested();
         ObjectDisposedException.ThrowIf(shutdown.IsCancellationRequested, this);
         string resolvedWorkingDirectory = Path.GetFullPath(workingDirectory);
-        string executable = FindExecutable();
+        AssistantLaunchCommand configuredLaunch = Volatile.Read(ref launchCommand);
+        string executable = FindExecutable(configuredLaunch.Executable);
         string runtimeDirectory = CopilotRuntimeCompatibility.Prepare(cancellationToken);
         string identifier = Guid.NewGuid().ToString();
         using TcpListener reservation = new(IPAddress.Loopback, 0);
@@ -51,6 +60,10 @@ public sealed class CopilotSessions(string? executablePath = null) : IAssistantS
             CreateNoWindow = false,
             WorkingDirectory = resolvedWorkingDirectory
         };
+        foreach (string argument in configuredLaunch.Arguments)
+        {
+            start.ArgumentList.Add(argument);
+        }
         start.ArgumentList.Add("--ui-server");
         start.ArgumentList.Add("--no-auto-update");
         start.ArgumentList.Add("--port");
@@ -82,17 +95,25 @@ public sealed class CopilotSessions(string? executablePath = null) : IAssistantS
         return terminal;
     }
 
-    private string FindExecutable()
+    private static string FindExecutable(string configured)
     {
-        string? configured = executablePath ?? Environment.GetEnvironmentVariable("COPILOT_CLI_PATH");
-        if (!string.IsNullOrWhiteSpace(configured))
+        if (!string.Equals(configured, "copilot", StringComparison.OrdinalIgnoreCase))
         {
-            string fullPath = Path.GetFullPath(configured);
-            if (!File.Exists(fullPath) || !fullPath.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
+            string? resolved = ResolveExecutable(configured);
+            if (resolved is null)
             {
-                throw new FileNotFoundException("Configure cliPath with the full path to copilot.exe.", fullPath);
+                throw new FileNotFoundException($"Could not find launch executable '{configured}'.");
             }
-            return fullPath;
+            return resolved;
+        }
+        string? environmentPath = Environment.GetEnvironmentVariable("COPILOT_CLI_PATH");
+        if (!string.IsNullOrWhiteSpace(environmentPath))
+        {
+            string? resolved = ResolveExecutable(environmentPath);
+            if (resolved is not null)
+            {
+                return resolved;
+            }
         }
         foreach (string directory in (Environment.GetEnvironmentVariable("PATH") ?? "").Split(Path.PathSeparator))
         {
@@ -114,7 +135,42 @@ public sealed class CopilotSessions(string? executablePath = null) : IAssistantS
                 }
             }
         }
-        throw new FileNotFoundException("Install GitHub Copilot CLI, sign in with copilot login, or configure cliPath.");
+        throw new FileNotFoundException("Install GitHub Copilot CLI, sign in with copilot login, or configure the launch command.");
+    }
+
+    private static string? ResolveExecutable(string executable)
+    {
+        if (Path.IsPathFullyQualified(executable) ||
+            executable.Contains(Path.DirectorySeparatorChar) ||
+            executable.Contains(Path.AltDirectorySeparatorChar))
+        {
+            string fullPath = Path.GetFullPath(executable);
+            if (File.Exists(fullPath))
+            {
+                return fullPath;
+            }
+            if (!fullPath.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) &&
+                File.Exists(fullPath + ".exe"))
+            {
+                return fullPath + ".exe";
+            }
+            return null;
+        }
+
+        foreach (string directory in (Environment.GetEnvironmentVariable("PATH") ?? "").Split(Path.PathSeparator))
+        {
+            string candidate = Path.Combine(directory.Trim('"'), executable);
+            if (File.Exists(candidate))
+            {
+                return candidate;
+            }
+            if (!candidate.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) &&
+                File.Exists(candidate + ".exe"))
+            {
+                return candidate + ".exe";
+            }
+        }
+        return null;
     }
 
     private async Task ObserveAsync(TerminalSession terminal, CancellationToken cancellationToken)
@@ -395,6 +451,67 @@ public sealed class CopilotSessions(string? executablePath = null) : IAssistantS
         return focused;
     }
 
+    public Task<AssistantGatherResult> GatherAsync(
+        AssistantWindowBounds workArea,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (workArea.Width <= 0 || workArea.Height <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(workArea), "Gather requires a non-empty screen work area.");
+        }
+
+        List<nint> windows = [];
+        HashSet<nint> seen = [];
+        foreach (TerminalSession terminal in terminals.Values)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (terminal.Process.HasExited)
+            {
+                continue;
+            }
+            nint window = FindTerminalWindow(terminal);
+            nint root = window == 0 ? 0 : GetAncestor(window, 3);
+            window = root == 0 ? window : root;
+            if (window != 0 && IsWindowVisible(window) && seen.Add(window))
+            {
+                windows.Add(window);
+            }
+        }
+        if (windows.Count == 0)
+        {
+            return Task.FromResult(new AssistantGatherResult([]));
+        }
+
+        int columns = (int)Math.Ceiling(Math.Sqrt(windows.Count));
+        int rows = (int)Math.Ceiling((double)windows.Count / columns);
+        const uint noActivateOrZOrder = 0x0010 | 0x0004 | 0x0200;
+        AssistantWindowBounds[] tiledBounds = new AssistantWindowBounds[windows.Count];
+        for (int index = 0; index < windows.Count; index++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            nint window = windows[index];
+            if (IsIconic(window) || IsZoomed(window))
+            {
+                ShowWindow(window, 9);
+            }
+            int column = index % columns;
+            int row = index / columns;
+            int left = workArea.Left + column * workArea.Width / columns;
+            int right = workArea.Left + (column + 1) * workArea.Width / columns;
+            int top = workArea.Top + row * workArea.Height / rows;
+            int bottom = workArea.Top + (row + 1) * workArea.Height / rows;
+            if (!SetWindowPos(window, 0, left, top, right - left, bottom - top, noActivateOrZOrder))
+            {
+                throw new Win32Exception(Marshal.GetLastWin32Error(), "Could not tile a managed terminal window.");
+            }
+            tiledBounds[index] = TryGetVisibleWindowBounds(window, out NativeRect actual)
+                ? new(actual.Left, actual.Top, actual.Right - actual.Left, actual.Bottom - actual.Top)
+                : new(left, top, right - left, bottom - top);
+        }
+        return Task.FromResult(new AssistantGatherResult(tiledBounds));
+    }
+
     public Task<AssistantSessionTarget?> CaptureSessionTargetAsync(CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -419,26 +536,14 @@ public sealed class CopilotSessions(string? executablePath = null) : IAssistantS
     }
 
     public async Task<AssistantPromptInjection?> InjectPromptAsync(
+        AssistantSessionTarget target,
         string prompt,
         CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(prompt);
-        string? targetKey = Volatile.Read(ref lastFocusedSessionKey);
-        if (!TryResolvePromptTarget(targetKey, out TerminalSession terminal, out SessionActivity activity))
+        if (!TryResolvePromptTarget(target.SessionId, out TerminalSession terminal, out SessionActivity activity))
         {
-            string? terminalIdentifier = Volatile.Read(ref lastOpenedTerminalIdentifier);
-            if (terminalIdentifier is null ||
-                !terminals.TryGetValue(terminalIdentifier, out TerminalSession? fallbackTerminal) ||
-                fallbackTerminal.ForegroundSessionId is not { } sessionId)
-            {
-                return null;
-            }
-            targetKey = Key(fallbackTerminal, sessionId);
-            if (!TryResolvePromptTarget(targetKey, out terminal, out activity))
-            {
-                return null;
-            }
-            Volatile.Write(ref lastFocusedSessionKey, targetKey);
+            return null;
         }
         CopilotSession session = activity.Session
             ?? throw new InvalidOperationException("The selected Copilot session is no longer attached.");
@@ -447,7 +552,7 @@ public sealed class CopilotSessions(string? executablePath = null) : IAssistantS
         AssistantWindowBounds? bounds = window != 0 && TryGetVisibleWindowBounds(window, out NativeRect rectangle)
             ? new(rectangle.Left, rectangle.Top, rectangle.Right - rectangle.Left, rectangle.Bottom - rectangle.Top)
             : null;
-        return new(targetKey!, bounds);
+        return new(target.SessionId, bounds);
     }
 
     private bool TryResolvePromptTarget(
@@ -847,7 +952,10 @@ public sealed class CopilotSessions(string? executablePath = null) : IAssistantS
     [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(nint window, out uint processId);
     [DllImport("user32.dll")] private static extern bool IsWindowVisible(nint window);
     [DllImport("user32.dll")] private static extern bool IsIconic(nint window);
+    [DllImport("user32.dll")] private static extern bool IsZoomed(nint window);
     [DllImport("user32.dll")] private static extern bool ShowWindow(nint window, int command);
+    [DllImport("user32.dll", SetLastError = true)] private static extern bool SetWindowPos(
+        nint window, nint insertAfter, int x, int y, int width, int height, uint flags);
     [DllImport("user32.dll")] private static extern bool SetForegroundWindow(nint window);
     [DllImport("user32.dll")] private static extern nint GetForegroundWindow();
     [DllImport("user32.dll")] private static extern bool GetWindowRect(nint window, out NativeRect rectangle);

@@ -54,6 +54,7 @@ internal sealed partial class ReplayWindow
         controller!.ActionRequested += OnActionRequested;
         StartSessionIntegration();
         StartPresentHost();
+        StartNeedsHost();
         pipeServer = new NamedPipeCommandServer(presentation.PipeName, HandleRequestAsync);
         _ = Task.Run(() => pipeServer.RunAsync(pipeCancellation.Token));
         pointerTimer.Start();
@@ -67,6 +68,7 @@ internal sealed partial class ReplayWindow
     {
         StopAttentionBounce();
         StopSessionLaunchJump();
+        StopNeedsHost();
         StopPresentHost();
         StopSessionIntegration();
         pipeCancellation.Cancel();
@@ -162,7 +164,7 @@ internal sealed partial class ReplayWindow
             controller.ShowMessage(message);
         }
         UpdateBubble();
-        if (!dragging && !releasingDrag && controller!.Snapshot.State != VisualState.Landing)
+        if (buddyActive && !dragging && !releasingDrag && controller!.Snapshot.State != VisualState.Landing)
         {
             StartPassiveMotion();
         }
@@ -237,11 +239,18 @@ internal sealed partial class ReplayWindow
 
     private void StartAttention()
     {
-        PresentationSnapshot current = controller!.Snapshot;
+        if (!buddyActive)
+        {
+            return;
+        }
+        Vector3 renderedPosition = CurrentRenderedBuddyOffset();
+        controller!.PlaceAt(renderedPosition.X / dpiScale);
+        sprite!.StopAnimation(nameof(sprite.Offset));
+        sprite.Offset = PositionOf(controller.Snapshot);
+        PresentationSnapshot current = controller.Snapshot;
         controller.ShowMessage(current.Message!);
         sprite!.StopAnimation(nameof(sprite.Scale));
         sprite.Scale = Vector3.One;
-        sprite.StopAnimation(nameof(sprite.Offset));
         ShowFrame(SpriteFrame.Wave1);
         StartAlternatingFrames(SpriteFrame.Wave1, SpriteFrame.Wave2,
             presentation.Attention.ReducedMotion ? presentation.Attention.ReducedMotionWaveFrameSeconds : presentation.Attention.WaveFrameSeconds);
@@ -255,6 +264,10 @@ internal sealed partial class ReplayWindow
 
     private void StartAttentionBounce()
     {
+        if (!buddyActive)
+        {
+            return;
+        }
         PresentationSnapshot current = controller!.Snapshot;
         PresentationController preview = new(presentation, new SystemRandomSource(0), current.X, current.X);
         preview.ShowMessage(current.Message!);

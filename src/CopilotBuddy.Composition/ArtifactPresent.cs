@@ -80,6 +80,15 @@ internal sealed class ArtifactPresent : IDisposable
     public bool IsOpened => opened;
     public bool IsMoving => dragMotion is not null;
 
+    public void SetPaused(bool paused)
+    {
+        SetAnimationPaused(root, nameof(root.Offset), paused);
+        foreach (CompositionColorBrush brush in resources.OfType<CompositionColorBrush>())
+        {
+            SetAnimationPaused(brush, nameof(brush.Color), paused);
+        }
+    }
+
     public bool CheckReady()
     {
         if (IsReady || !producerCompleted || !File.Exists(ArtifactPath))
@@ -443,6 +452,23 @@ internal sealed class ArtifactPresent : IDisposable
             4 => Windows.UI.Color.FromArgb(255, rising, 70, 255),
             _ => Windows.UI.Color.FromArgb(255, 255, 70, falling)
         };
+    }
+
+    private static void SetAnimationPaused(CompositionObject target, string propertyName, bool paused)
+    {
+        AnimationController? controller = target.TryGetAnimationController(propertyName);
+        if (controller is null)
+        {
+            return;
+        }
+        if (paused)
+        {
+            controller.Pause();
+        }
+        else
+        {
+            controller.Resume();
+        }
     }
 
     public void Dispose()

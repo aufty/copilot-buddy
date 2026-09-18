@@ -6,14 +6,14 @@ namespace CopilotBuddy.Copilot;
 
 public static class CopilotSessionBrokerHost
 {
-    public static async Task RunAsync(string? cliPath, CancellationToken cancellationToken = default)
+    public static async Task RunAsync(CancellationToken cancellationToken = default)
     {
-        using Mutex instance = new(true, "Local\\CopilotBuddy.AssistantBroker.v4", out bool firstInstance);
+        using Mutex instance = new(true, "Local\\CopilotBuddy.AssistantBroker.v9", out bool firstInstance);
         if (!firstInstance)
         {
             return;
         }
-        await using CopilotSessions sessions = new(cliPath);
+        await using CopilotSessions sessions = new();
         BrokerState state = new(sessions);
         await state.RunAsync(cancellationToken);
     }
@@ -134,14 +134,18 @@ public static class CopilotSessionBrokerHost
             {
                 object? result = request.Name switch
                 {
+                    AssistantBrokerProtocol.ConfigureLaunch => ConfigureLaunch(
+                        Deserialize<AssistantLaunchCommand>(request)),
                     AssistantBrokerProtocol.Open => await OpenAsync(
                         Deserialize<BrokerOpenRequest>(request).WorkingDirectory, cancellationToken),
                     AssistantBrokerProtocol.Focus => await sessions.FocusAsync(
                         Deserialize<BrokerFocusRequest>(request).SessionId, cancellationToken),
+                    AssistantBrokerProtocol.Gather => await sessions.GatherAsync(
+                        Deserialize<AssistantWindowBounds>(request), cancellationToken),
                     AssistantBrokerProtocol.CaptureSessionTarget =>
                         await sessions.CaptureSessionTargetAsync(cancellationToken),
-                    AssistantBrokerProtocol.InjectPrompt => await sessions.InjectPromptAsync(
-                        Deserialize<BrokerInjectPromptRequest>(request).Prompt, cancellationToken),
+                    AssistantBrokerProtocol.InjectPrompt => await InjectPromptAsync(
+                        Deserialize<BrokerInjectPromptRequest>(request), cancellationToken),
                     AssistantBrokerProtocol.StartHandoff => await StartHandoffAsync(
                         Deserialize<BrokerStartHandoffRequest>(request), cancellationToken),
                     AssistantBrokerProtocol.CloseHandoffSource => await CloseHandoffSourceAsync(
@@ -166,11 +170,22 @@ public static class CopilotSessionBrokerHost
             }
         }
 
+        private bool ConfigureLaunch(AssistantLaunchCommand command)
+        {
+            sessions.ConfigureLaunch(command);
+            return true;
+        }
+
         private async Task<bool> OpenAsync(string workingDirectory, CancellationToken cancellationToken)
         {
             await sessions.OpenAsync(workingDirectory, cancellationToken);
             return true;
         }
+
+        private Task<AssistantPromptInjection?> InjectPromptAsync(
+            BrokerInjectPromptRequest request,
+            CancellationToken cancellationToken) =>
+            sessions.InjectPromptAsync(request.Target, request.Prompt, cancellationToken);
 
         private Task<AssistantHandoff?> StartHandoffAsync(
             BrokerStartHandoffRequest request,

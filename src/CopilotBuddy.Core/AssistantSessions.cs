@@ -40,6 +40,8 @@ public sealed record AssistantSessionTarget(
 
 public sealed record AssistantWindowBounds(int Left, int Top, int Width, int Height);
 
+public sealed record AssistantGatherResult(AssistantWindowBounds[] Windows);
+
 public sealed record AssistantPromptInjection(
     string SessionId,
     AssistantWindowBounds? WindowBounds);
@@ -88,8 +90,12 @@ public interface IAssistantSessions : IAsyncDisposable
     event EventHandler<string>? ConnectionFailed;
     Task OpenAsync(string workingDirectory, CancellationToken cancellationToken);
     Task<bool> FocusAsync(string sessionId, CancellationToken cancellationToken);
+    Task<AssistantGatherResult> GatherAsync(
+        AssistantWindowBounds workArea,
+        CancellationToken cancellationToken);
     Task<AssistantSessionTarget?> CaptureSessionTargetAsync(CancellationToken cancellationToken);
     Task<AssistantPromptInjection?> InjectPromptAsync(
+        AssistantSessionTarget target,
         string prompt,
         CancellationToken cancellationToken);
     Task<AssistantHandoff?> StartHandoffAsync(

@@ -27,7 +27,7 @@ public sealed class PresentationOptions
 
 public sealed class SpriteOptions
 {
-    public string Path { get; init; } = "Assets/Sprites/buddy.png";
+    public string Path { get; init; } = "Assets/Sprites/Buddies/sprout.png";
     public int Scale { get; init; } = 2;
     public Dictionary<SpriteFrame, FrameRectangle> Frames { get; init; } = [];
 

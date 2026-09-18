@@ -10,8 +10,7 @@
   <ItemGroup>
     <ProjectReference Include="..\CopilotBuddy.Core\CopilotBuddy.Core.csproj" />
     <ProjectReference Include="..\CopilotBuddy.Copilot\CopilotBuddy.Copilot.csproj" />
-    <Content Include="Assets\Sprites\buddy.png" CopyToOutputDirectory="PreserveNewest" />
-    <Content Include="Assets\Sprites\present.png" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="Assets\Sprites\**\*.png" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="Assets\Fonts\*" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="presentation.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>

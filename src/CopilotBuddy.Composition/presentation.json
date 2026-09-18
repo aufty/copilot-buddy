@@ -1,6 +1,6 @@
 {
   "sprite": {
-    "path": "Assets/Sprites/buddy.png",
+    "path": "Assets/Sprites/Buddies/sprout.png",
     "scale": 2,
     "frames": {
       "standing": { "x": 0, "y": 0, "width": 14, "height": 20 },

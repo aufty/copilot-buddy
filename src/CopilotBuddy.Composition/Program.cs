@@ -20,12 +20,7 @@ internal static class Program
         string[] arguments = Environment.GetCommandLineArgs();
         if (arguments.Contains("--assistant-broker", StringComparer.OrdinalIgnoreCase))
         {
-            int cliPathIndex = Array.FindIndex(arguments,
-                argument => string.Equals(argument, "--broker-cli-path", StringComparison.OrdinalIgnoreCase));
-            string? cliPath = cliPathIndex >= 0 && cliPathIndex + 1 < arguments.Length
-                ? arguments[cliPathIndex + 1]
-                : null;
-            CopilotBuddy.Copilot.CopilotSessionBrokerHost.RunAsync(cliPath).GetAwaiter().GetResult();
+            CopilotBuddy.Copilot.CopilotSessionBrokerHost.RunAsync().GetAwaiter().GetResult();
             return;
         }
         Application.SetUnhandledExceptionMode(UnhandledExceptionMode.ThrowException);
@@ -41,7 +36,9 @@ internal static class Program
                 ?? throw new InvalidOperationException("Could not locate the Copilot Buddy executable.");
             using CancellationTokenSource startupTimeout = new(TimeSpan.FromSeconds(12));
             AssistantSessionBrokerClient sessions = AssistantSessionBrokerClient.ConnectAsync(
-                executablePath, settings.CliPath, startupTimeout.Token).GetAwaiter().GetResult();
+                executablePath, startupTimeout.Token).GetAwaiter().GetResult();
+            sessions.ConfigureLaunchAsync(settings.EffectiveCopilotLaunch, startupTimeout.Token)
+                .GetAwaiter().GetResult();
             Application.Run(new ReplayWindow(sessions, settings));
         }
         catch (Exception exception)
@@ -117,6 +114,7 @@ internal sealed partial class ReplayWindow : Form
     private readonly bool delayDragReports = Environment.GetCommandLineArgs().Contains("--delayed-drag-reports");
     private readonly uint taskbarCreatedMessage = RegisterWindowMessage("TaskbarCreated");
     private TaskbarLayerController? taskbarLayer;
+    private bool buddyActive = true;
 
     public ReplayWindow(IStoredAssistantSessions sessions, SessionSettings settings)
     {
@@ -236,6 +234,7 @@ internal sealed partial class ReplayWindow : Form
             StartPassiveMotion();
             SystemEvents.DisplaySettingsChanged += OnDisplaySettingsChanged;
             SystemEvents.UserPreferenceChanged += OnUserPreferenceChanged;
+            StartActivityMonitoring();
         }
         if (smokeTest || interactionSmoke)
         {
@@ -276,7 +275,8 @@ internal sealed partial class ReplayWindow : Form
         }
         frameVisuals.Clear();
         frameMasks.Clear();
-        using Bitmap bitmap = new(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, presentation.Sprite.Path)));
+        BuddySprite selectedSprite = BuddySpriteCatalog.Resolve(sessionSettings.Buddy);
+        using Bitmap bitmap = new(selectedSprite.Path);
         FrameRectangle standing = presentation.Sprite.Frames[SpriteFrame.Standing];
         float scale = presentation.Sprite.Scale * dpiScale;
         spriteWidth = standing.Width * presentation.Sprite.Scale;
@@ -330,7 +330,9 @@ internal sealed partial class ReplayWindow : Form
 
     private void StartPassiveMotion()
     {
-        if (attentionBounce is not null || sessionLaunchJump is not null || handoffWindowJump is not null)
+        if (!buddyActive || attentionBounce is not null || sessionLaunchJump is not null ||
+            handoffWindowJump is not null || chairHop is not null || supplyRetrieval is not null ||
+            supplyAttentionLanding is not null)
         {
             return;
         }
@@ -339,17 +341,44 @@ internal sealed partial class ReplayWindow : Form
             return;
         }
         passiveTimer.Stop();
-        PassiveMotionPlan? plan = controller!.PlanPassiveMotion();
-        PresentationSnapshot current = controller.Snapshot;
+        PresentationSnapshot current = controller!.Snapshot;
         if (!current.IsVisible)
         {
             return;
         }
         if (current.State == VisualState.Attention)
         {
+            if (seated)
+            {
+                BeginChairHop(entering: false, StartPassiveMotion);
+                return;
+            }
             StartAttention();
             return;
         }
+        if (chairRecallPending && seated && !dragging && !releasingDrag)
+        {
+            chairRecallPending = false;
+            if (Chair is { } chair)
+            {
+                RequestSupplyRecall(chair);
+            }
+            return;
+        }
+        if (TryStartSupplyRetrieval())
+        {
+            return;
+        }
+        if (seated || (Chair is not null && !seated) || supplies.Values.Any(supply => supply.IsCarried))
+        {
+            controller.ResetWandering();
+            sprite!.StopAnimation(nameof(sprite.Offset));
+            sprite.Offset = PositionOf(controller.Snapshot);
+            ShowFrame(SpriteFrame.Standing);
+            StartBreathing();
+            return;
+        }
+        PassiveMotionPlan? plan = controller.PlanPassiveMotion();
         if (plan is null)
         {
             if (current.State == VisualState.Idle)
@@ -475,7 +504,8 @@ internal sealed partial class ReplayWindow : Form
         long now = Stopwatch.GetTimestamp();
         TimeSpan remaining = Stopwatch.GetElapsedTime(modelTimestamp, now);
         modelTimestamp = now;
-        if (dragging || releasingDrag || sessionLaunchJump is not null || handoffWindowJump is not null ||
+        if (!buddyActive || seated || dragging || releasingDrag || sessionLaunchJump is not null ||
+            handoffWindowJump is not null || supplyAttentionLanding is not null ||
             (attentionBounce is not null && controller!.Message is null))
         {
             return;
@@ -530,7 +560,8 @@ internal sealed partial class ReplayWindow : Form
         {
             return false;
         }
-        if (attentionBounce is not null && bubblePosition is not null)
+        if ((attentionBounce is not null || supplyRetrieval is not null || chairHop is not null) &&
+            bubblePosition is not null)
         {
             Vector3 position = bubblePosition.Position;
             snapshot = snapshot with
@@ -539,7 +570,7 @@ internal sealed partial class ReplayWindow : Form
                 HopOffset = baseline - position.Y / dpiScale,
                 ScaleX = 1,
                 ScaleY = 1,
-                Frame = SpriteFrame.Wave1
+                Frame = attentionBounce is not null ? SpriteFrame.Wave1 : snapshot.Frame
             };
         }
         double left = snapshot.X + spriteWidth * (1 - snapshot.ScaleX) / 2;
@@ -559,12 +590,17 @@ internal sealed partial class ReplayWindow : Form
             return;
         }
         AdvanceModel();
+        if (args.Button == MouseButtons.Left && HitSupply(args.Location))
+        {
+            BeginSupplyPress(args.Location);
+            return;
+        }
         if (args.Button == MouseButtons.Left && HitPresent(args.Location))
         {
             BeginPresentPress(args.Location);
             return;
         }
-        if (!HitSprite(args.Location))
+        if (!HitSprite(args.Location) && !HitOccupiedChair(args.Location))
         {
             return;
         }
@@ -590,6 +626,21 @@ internal sealed partial class ReplayWindow : Form
 
     private void BeginPointerDrag(Point point)
     {
+        CancelSupplyRetrieval();
+        if (chairHop is not null)
+        {
+            CancelChairHop();
+        }
+        if (seated && Chair is { } chair)
+        {
+            Vector3 renderedPosition = CurrentRenderedBuddyOffset();
+            controller!.PlaceAt(renderedPosition.X / dpiScale);
+            sprite!.StopAnimation(nameof(sprite.Offset));
+            sprite.Offset = PositionOf(controller.Snapshot);
+            chair.DetachFromBuddy(sprite, controller.Snapshot.X, spriteWidth);
+            seated = false;
+            controller.ResetWandering();
+        }
         Vector3? bouncePosition = attentionBounce is not null ? bubblePosition?.Position : null;
         StopAttentionBounce();
         passiveTimer.Stop();
@@ -650,6 +701,10 @@ internal sealed partial class ReplayWindow : Form
     protected override void OnMouseMove(MouseEventArgs args)
     {
         base.OnMouseMove(args);
+        if (TrackSupplyPress(args.Location))
+        {
+            return;
+        }
         if (TrackPresentPress(args.Location))
         {
             return;
@@ -665,7 +720,11 @@ internal sealed partial class ReplayWindow : Form
 
     private void FlushPointer()
     {
-        if (presentDragging)
+        if (supplyDragging)
+        {
+            pressedSupply?.TickDrag();
+        }
+        else if (presentDragging)
         {
             pressedPresent?.TickDrag();
         }
@@ -678,6 +737,11 @@ internal sealed partial class ReplayWindow : Form
             return;
         }
         pointerPending = false;
+        if (supplyDragging)
+        {
+            pressedSupply?.DragTo(pendingPointer);
+            return;
+        }
         if (presentDragging)
         {
             pressedPresent?.DragTo(pendingPointer);
@@ -709,6 +773,10 @@ internal sealed partial class ReplayWindow : Form
         base.OnMouseUp(args);
         if (args.Button == MouseButtons.Left)
         {
+            if (EndSupplyPress(args.Location))
+            {
+                return;
+            }
             if (EndPresentPress(args.Location))
             {
                 return;
@@ -745,6 +813,7 @@ internal sealed partial class ReplayWindow : Form
         if (!Capture)
         {
             attentionPressPending = false;
+            CancelOrReleaseSupplyPress();
             CancelOrReleasePresentPress();
         }
         if (dragging && !Capture)
@@ -841,15 +910,29 @@ internal sealed partial class ReplayWindow : Form
         {
             return;
         }
+        if (!buddyActive)
+        {
+            int inactiveStyle = GetWindowLong(Handle, -20);
+            if (TaskbarMode && (inactiveStyle & 0x20) == 0)
+            {
+                SetWindowLong(Handle, -20, inactiveStyle | 0x20);
+            }
+            return;
+        }
         AdvanceModel();
         UpdateBubble();
         UpdatePresentBubble();
         Point pointer = PointToClient(Cursor.Position);
+        PollSupplyPlacement(pointer);
+        PollSupplyPress(pointer);
         PollPresentPress(pointer);
         bool buddyHit = HitSprite(pointer);
+        bool supplyHit = HitSupply(pointer);
+        bool occupiedChairHit = HitOccupiedChair(pointer);
         bool presentHit = HitPresent(pointer);
-        bool interactionHold = buddyHit || skillMenu.Visible;
-        bool interactive = dragging || presentPressPending || presentDragging || interactionHold || presentHit || exitMenu.Visible;
+        bool interactionHold = buddyHit || occupiedChairHit || skillMenu.Visible;
+        bool interactive = dragging || supplyPressPending || supplyDragging ||
+            presentPressPending || presentDragging || interactionHold || supplyHit || presentHit || exitMenu.Visible;
         int style = GetWindowLong(Handle, -20);
         int updatedStyle = interactive ? style & ~0x20 : style | 0x20;
         if (TaskbarMode && style != updatedStyle)
@@ -861,7 +944,8 @@ internal sealed partial class ReplayWindow : Form
             RecordDragTrace(interactionHold ? "hover-enter" : "hover-leave");
             hovered = interactionHold;
             controller.SetHovered(interactionHold);
-            if (controller.Snapshot.State is VisualState.Idle or VisualState.Walking)
+            if (supplyRetrieval is null && chairHop is null &&
+                controller.Snapshot.State is VisualState.Idle or VisualState.Walking)
             {
                 StartPassiveMotion();
             }
@@ -922,6 +1006,10 @@ internal sealed partial class ReplayWindow : Form
 
     protected override void WndProc(ref Message message)
     {
+        if (HandleActivityMessage(ref message))
+        {
+            return;
+        }
         if (TaskbarMode && (uint)message.Msg == taskbarCreatedMessage)
         {
             taskbarLayer?.Reattach();
@@ -954,6 +1042,11 @@ internal sealed partial class ReplayWindow : Form
             _ = InjectInquireAsync();
             return;
         }
+        if (message.Msg == 0x0312 && message.WParam == GatherHotkeyId)
+        {
+            _ = GatherWindowsAsync();
+            return;
+        }
         if (TaskbarMode && message.Msg == 0x0021)
         {
             message.Result = HasSessionAction || HasInteractivePresent ? 1 : 3;
@@ -965,8 +1058,9 @@ internal sealed partial class ReplayWindow : Form
             long packed = message.LParam.ToInt64();
             Point screenPoint = new(unchecked((short)packed), unchecked((short)(packed >> 16)));
             Point clientPoint = PointToClient(screenPoint);
-            message.Result = dragging || presentPressPending || presentDragging ||
-                HitSprite(clientPoint) || HitPresent(clientPoint) ? 1 : -1;
+            message.Result = dragging || supplyPressPending || supplyDragging ||
+                presentPressPending || presentDragging || HitSprite(clientPoint) ||
+                HitOccupiedChair(clientPoint) || HitSupply(clientPoint) || HitPresent(clientPoint) ? 1 : -1;
             return;
         }
         base.WndProc(ref message);
@@ -999,7 +1093,9 @@ internal sealed partial class ReplayWindow : Form
         {
             return;
         }
-        if (dragging || releasingDrag || handoffPresent?.IsMoving == true ||
+        if (dragging || releasingDrag || supplyDragging || handoffPresent?.IsMoving == true ||
+            supplies.Values.Any(supply => supply.IsMoving) || supplyRetrieval is not null ||
+            supplyAttentionLanding is not null || chairHop is not null ||
             visitingHandoffWindow || handoffWindowJump is not null)
         {
             placementPending = true;
@@ -1026,6 +1122,7 @@ internal sealed partial class ReplayWindow : Form
             LoadSpriteFrames();
             UpdateContextSweat();
             RelayoutPresent();
+            RelayoutSupply();
             controller.SetHorizontalBounds(0, Math.Max(0, ClientSize.Width / dpiScale - spriteWidth));
             controller.SetMaximumLift(Math.Max(0, baseline));
             sprite!.StopAnimation(nameof(sprite.Offset));
@@ -1109,6 +1206,7 @@ internal sealed partial class ReplayWindow : Form
         taskbarLayer?.Dispose();
         SystemEvents.DisplaySettingsChanged -= OnDisplaySettingsChanged;
         SystemEvents.UserPreferenceChanged -= OnUserPreferenceChanged;
+        StopActivityMonitoring();
         trayIcon?.Dispose();
         exitMenu.Dispose();
         interactionTestTimer?.Dispose();

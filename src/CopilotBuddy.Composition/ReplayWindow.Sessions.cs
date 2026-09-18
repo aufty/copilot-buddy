@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Numerics;
 using System.Runtime.InteropServices;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using CopilotBuddy.Core;
 using Windows.UI.Composition;
 
@@ -14,6 +15,7 @@ internal sealed partial class ReplayWindow
     private const int HandoffHotkeyId = 0x4244;
     private const int StoreHotkeyId = 0x4245;
     private const int InquireHotkeyId = 0x4246;
+    private const int GatherHotkeyId = 0x4247;
     private const int TestHotkeyId = 0x42FF;
     private readonly IStoredAssistantSessions assistantSessions;
     private readonly SessionSettings sessionSettings;
@@ -26,9 +28,14 @@ internal sealed partial class ReplayWindow
     private readonly List<CompositionObject> sparkleResources = [];
     private readonly System.Windows.Forms.Timer sparkleTimer = new() { Interval = 850 };
     private readonly System.Windows.Forms.Timer focusWaitTimer = new() { Interval = 350 };
+    private static readonly TimeSpan MinimumInquireWindowDwell = TimeSpan.FromMilliseconds(500);
     private CompositionScopedBatch? sessionLaunchJump;
     private CompositionScopedBatch? handoffWindowJump;
+    private TaskCompletionSource<long>? handoffWindowArrival;
+    private TaskCompletionSource<long>? handoffTaskbarArrival;
+    private AssistantHandoff? deferredHandoffPresent;
     private bool visitingHandoffWindow;
+    private bool endingHandoffWindowVisit;
     private bool restoringTaskbarAfterHandoffJump;
     private Rectangle handoffTaskbarBounds;
     private double handoffTaskbarTargetX;
@@ -37,6 +44,7 @@ internal sealed partial class ReplayWindow
     private string? focusWaitMessage;
     private int focusWaitFrame;
     private bool startingHandoff;
+    private bool gatheringWindows;
     private bool storingSession;
     private bool injectingInquire;
     private bool hotkeyRegistered;
@@ -44,16 +52,21 @@ internal sealed partial class ReplayWindow
     private bool handoffHotkeyRegistered;
     private bool storeHotkeyRegistered;
     private bool inquireHotkeyRegistered;
+    private bool gatherHotkeyRegistered;
     private SparkleBorderWindow? sparkleBorder;
     private bool sessionsStopping;
     private ToolStripMenuItem? shortcutMenu;
+    private bool SkillsBlocked => gatheringWindows;
 
     private void AddSessionMenu()
     {
         skillMenu.SummonRequested += async (_, _) => await SummonAsync();
         skillMenu.InquireRequested += async (_, _) => await InjectInquireAsync();
         skillMenu.HandoffRequested += async (_, _) => await StartHandoffAsync();
+        skillMenu.GatherRequested += async (_, _) => await GatherWindowsAsync();
         skillMenu.StoreRequested += async (_, _) => await StoreSessionAsync();
+        skillMenu.SettingsRequested += async (_, _) => await EditSettingsAsync();
+        skillMenu.SupplyRequested += (_, args) => SelectSupply(args.Kind);
         skillMenu.VisibleChanged += (_, _) => UpdatePointerRouting();
 
         exitMenu.Items.Add("Summon", null, async (_, _) => await SummonAsync());
@@ -142,11 +155,24 @@ internal sealed partial class ReplayWindow
             throw new Win32Exception(Marshal.GetLastWin32Error(), "Alt+Shift+G is unavailable for Inquire.");
         }
         inquireHotkeyRegistered = true;
+        if (!RegisterHotKey(Handle, GatherHotkeyId, 0x4005, (uint)Keys.T))
+        {
+            UnregisterHotKey(Handle, InquireHotkeyId);
+            UnregisterHotKey(Handle, StoreHotkeyId);
+            UnregisterHotKey(Handle, HandoffHotkeyId);
+            UnregisterHotKey(Handle, SkillMenuHotkeyId);
+            inquireHotkeyRegistered = false;
+            storeHotkeyRegistered = false;
+            handoffHotkeyRegistered = false;
+            skillMenuHotkeyRegistered = false;
+            throw new Win32Exception(Marshal.GetLastWin32Error(), "Alt+Shift+T is unavailable for Gather.");
+        }
+        gatherHotkeyRegistered = true;
     }
 
     private void ShowSkillMenu()
     {
-        if (controller is null || !controller.IsVisible)
+        if (SkillsBlocked || controller is null || !controller.IsVisible)
         {
             return;
         }
@@ -155,7 +181,7 @@ internal sealed partial class ReplayWindow
         Point buddyTopRight = PointToScreen(new Point(
             (int)Math.Round((snapshot.X + spriteWidth) * dpiScale),
             (int)Math.Round((baseline - snapshot.HopOffset) * dpiScale)));
-        Size menuSize = new((int)Math.Round(360 * dpiScale), (int)Math.Round(378 * dpiScale));
+        Size menuSize = new((int)Math.Round(560 * dpiScale), (int)Math.Round(454 * dpiScale));
         Rectangle area = Screen.FromPoint(buddyTopRight).WorkingArea;
         int x = buddyTopRight.X + (int)(8 * dpiScale);
         if (x + menuSize.Width > area.Right)
@@ -171,20 +197,34 @@ internal sealed partial class ReplayWindow
 
     private async Task InjectInquireAsync()
     {
-        if (injectingInquire || sessionsStopping)
+        if (SkillsBlocked || injectingInquire || sessionsStopping)
         {
             return;
         }
         injectingInquire = true;
         skillMenu.Hide();
-        StartSessionLaunchJump();
+        Task<long>? windowArrival = null;
         try
         {
             using CancellationTokenSource timeout =
                 CancellationTokenSource.CreateLinkedTokenSource(sessionCancellation.Token);
             timeout.CancelAfter(TimeSpan.FromSeconds(10));
+            AssistantSessionTarget? target =
+                await assistantSessions.CaptureSessionTargetAsync(timeout.Token);
+            if (target is null)
+            {
+                ShowSessionError("Open and focus a Copilot CLI session managed by the buddy before using Inquire.");
+                return;
+            }
+            if (target.WindowBounds is { Width: > 0, Height: > 0 } windowBounds)
+            {
+                windowArrival = BeginHandoffWindowVisit(windowBounds);
+            }
             AssistantPromptInjection? injection =
-                await assistantSessions.InjectPromptAsync(AssistantSkillPrompts.Grilling, timeout.Token);
+                await assistantSessions.InjectPromptAsync(
+                    target,
+                    AssistantSkillPrompts.Grilling,
+                    timeout.Token);
             if (injection is null)
             {
                 ShowSessionError("Open and focus a Copilot CLI session managed by the buddy before using Inquire.");
@@ -208,6 +248,17 @@ internal sealed partial class ReplayWindow
                 };
                 border.Show();
             }
+            if (windowArrival is not null)
+            {
+                long arrivedAt = await windowArrival.WaitAsync(sessionCancellation.Token);
+                TimeSpan remainingDwell =
+                    MinimumInquireWindowDwell -
+                    System.Diagnostics.Stopwatch.GetElapsedTime(arrivedAt);
+                if (remainingDwell > TimeSpan.Zero)
+                {
+                    await Task.Delay(remainingDwell, sessionCancellation.Token);
+                }
+            }
         }
         catch (OperationCanceledException) when (sessionCancellation.IsCancellationRequested) { }
         catch (Exception exception)
@@ -216,13 +267,14 @@ internal sealed partial class ReplayWindow
         }
         finally
         {
+            _ = EndHandoffWindowVisit();
             injectingInquire = false;
         }
     }
 
     private async Task StartHandoffAsync()
     {
-        if (startingHandoff || sessionsStopping)
+        if (SkillsBlocked || startingHandoff || sessionsStopping)
         {
             return;
         }
@@ -261,7 +313,7 @@ internal sealed partial class ReplayWindow
         {
             if (target.WindowBounds is { Width: > 0, Height: > 0 } windowBounds)
             {
-                BeginHandoffWindowVisit(windowBounds);
+                _ = BeginHandoffWindowVisit(windowBounds);
             }
             HandoffRequest? request;
             try
@@ -270,7 +322,7 @@ internal sealed partial class ReplayWindow
             }
             finally
             {
-                EndHandoffWindowVisit();
+                _ = EndHandoffWindowVisit();
             }
             if (request is null)
             {
@@ -284,7 +336,14 @@ internal sealed partial class ReplayWindow
             {
                 if (!sessionsStopping)
                 {
-                    DropHandoffPresent(handoff);
+                    if (visitingHandoffWindow)
+                    {
+                        deferredHandoffPresent = handoff;
+                    }
+                    else
+                    {
+                        DropHandoffPresent(handoff);
+                    }
                 }
             }
 
@@ -306,7 +365,7 @@ internal sealed partial class ReplayWindow
 
     private async Task StoreSessionAsync()
     {
-        if (storingSession || sessionsStopping)
+        if (SkillsBlocked || storingSession || sessionsStopping)
         {
             return;
         }
@@ -339,6 +398,74 @@ internal sealed partial class ReplayWindow
         finally
         {
             storingSession = false;
+        }
+    }
+
+    private async Task GatherWindowsAsync()
+    {
+        if (gatheringWindows || startingHandoff || storingSession || injectingInquire ||
+            openingSession || visitingHandoffWindow || sessionsStopping)
+        {
+            return;
+        }
+        gatheringWindows = true;
+        skillMenu.Hide();
+        try
+        {
+            Rectangle area = Screen.PrimaryScreen!.WorkingArea;
+            AssistantWindowBounds workArea = new(area.Left, area.Top, area.Width, area.Height);
+            using CancellationTokenSource timeout =
+                CancellationTokenSource.CreateLinkedTokenSource(sessionCancellation.Token);
+            timeout.CancelAfter(TimeSpan.FromSeconds(10));
+            AssistantGatherResult gathered = await assistantSessions.GatherAsync(workArea, timeout.Token);
+            if (gathered.Windows.Length == 0)
+            {
+                ShowSessionError("Open a Copilot CLI window with the buddy before using Gather.");
+                return;
+            }
+            Sparkle();
+            Task<long>? arrival = BeginHandoffWindowVisit(gathered.Windows[0]);
+            if (arrival is not null)
+            {
+                await arrival.WaitAsync(sessionCancellation.Token);
+                await Task.Delay(TimeSpan.FromMilliseconds(250), sessionCancellation.Token);
+                foreach (AssistantWindowBounds window in gathered.Windows.Skip(1))
+                {
+                    arrival = ContinueHandoffWindowVisit(window);
+                    if (arrival is null)
+                    {
+                        break;
+                    }
+                    await arrival.WaitAsync(sessionCancellation.Token);
+                    await Task.Delay(TimeSpan.FromMilliseconds(250), sessionCancellation.Token);
+                }
+                Task<long>? taskbarArrival = EndHandoffWindowVisit();
+                if (taskbarArrival is not null)
+                {
+                    await taskbarArrival.WaitAsync(sessionCancellation.Token);
+                }
+            }
+        }
+        catch (OperationCanceledException) when (sessionCancellation.IsCancellationRequested) { }
+        catch (Exception exception)
+        {
+            ShowSessionError($"Could not gather Copilot windows: {exception.Message}");
+        }
+        finally
+        {
+            if (visitingHandoffWindow)
+            {
+                Task<long>? taskbarArrival = EndHandoffWindowVisit();
+                if (taskbarArrival is not null && !sessionCancellation.IsCancellationRequested)
+                {
+                    try
+                    {
+                        await taskbarArrival.WaitAsync(sessionCancellation.Token);
+                    }
+                    catch (OperationCanceledException) when (sessionCancellation.IsCancellationRequested) { }
+                }
+            }
+            gatheringWindows = false;
         }
     }
 
@@ -387,6 +514,11 @@ internal sealed partial class ReplayWindow
 
     private void RefreshAttention()
     {
+        bool pauseSupply = HasSessionAction;
+        if (pauseSupply)
+        {
+            UpdateSupplyAlertPause(true);
+        }
         string? message = SessionMessage;
         if (controller!.Message != message)
         {
@@ -397,11 +529,19 @@ internal sealed partial class ReplayWindow
             });
         }
         UpdateQueueOrbs();
+        if (!pauseSupply)
+        {
+            UpdateSupplyAlertPause(false);
+        }
+        if (!buddyActive)
+        {
+            SetBuddyAnimationsPaused(true);
+        }
     }
 
     private async Task OpenSessionAsync(bool celebrate = false)
     {
-        if (openingSession || sessionsStopping)
+        if (SkillsBlocked || openingSession || sessionsStopping)
         {
             return;
         }
@@ -431,6 +571,10 @@ internal sealed partial class ReplayWindow
 
     private async Task SummonAsync()
     {
+        if (SkillsBlocked)
+        {
+            return;
+        }
         skillMenu.Hide();
         if (HasSessionAction)
         {
@@ -442,12 +586,18 @@ internal sealed partial class ReplayWindow
 
     private void StartSessionLaunchJump()
     {
-        if (controller is null || sprite is null || !controller.IsVisible || dragging || releasingDrag ||
+        if (seated)
+        {
+            BeginChairHop(entering: false, StartSessionLaunchJump);
+            return;
+        }
+        if (!buddyActive || controller is null || sprite is null || !controller.IsVisible || dragging || releasingDrag ||
             controller.Snapshot.State is VisualState.Airborne or VisualState.Landing)
         {
             return;
         }
 
+        InterruptSupplyMotionForSkill();
         AdvanceModel();
         controller.ResetWandering();
         StopAttentionBounce();
@@ -507,15 +657,20 @@ internal sealed partial class ReplayWindow
         batch?.Dispose();
     }
 
-    private void BeginHandoffWindowVisit(AssistantWindowBounds windowBounds)
+    private Task<long>? BeginHandoffWindowVisit(AssistantWindowBounds windowBounds)
     {
+        if (seated)
+        {
+            return BeginHandoffWindowVisitAfterChairHop(windowBounds);
+        }
         if (!TaskbarMode || controller is null || sprite is null || compositor is null ||
             dragging || releasingDrag || visitingHandoffWindow)
         {
-            return;
+            return null;
         }
 
         AdvanceModel();
+        InterruptSupplyMotionForSkill();
         StopAttentionBounce();
         StopSessionLaunchJump();
         StopHandoffWindowJump();
@@ -533,11 +688,14 @@ internal sealed partial class ReplayWindow
         if (target.Width <= 0 || target.Height <= 0)
         {
             StartPassiveMotion();
-            return;
+            return null;
         }
 
         visitingHandoffWindow = true;
+        endingHandoffWindowVisit = false;
         restoringTaskbarAfterHandoffJump = false;
+        handoffTaskbarArrival = null;
+        handoffWindowArrival = new(TaskCreationOptions.RunContinuationsAsynchronously);
         repositioning = true;
         try
         {
@@ -565,13 +723,79 @@ internal sealed partial class ReplayWindow
         Vector3 localStart = new(startScreen.X - virtualScreen.Left, startScreen.Y - virtualScreen.Top, 0);
         Vector3 destination = PositionOf(controller.Snapshot with { HopOffset = 0 });
         StartHandoffWindowJump(localStart, destination);
+        return handoffWindowArrival.Task;
     }
 
-    private void EndHandoffWindowVisit()
+    private Task<long>? ContinueHandoffWindowVisit(AssistantWindowBounds windowBounds)
+    {
+        if (!visitingHandoffWindow || restoringTaskbarAfterHandoffJump || handoffWindowJump is not null ||
+            controller is null || sprite is null || compositor is null)
+        {
+            return null;
+        }
+
+        Rectangle virtualScreen = SystemInformation.VirtualScreen;
+        Rectangle target = Rectangle.Intersect(
+            new Rectangle(windowBounds.Left, windowBounds.Top, windowBounds.Width, windowBounds.Height),
+            virtualScreen);
+        if (target.Width <= 0 || target.Height <= 0)
+        {
+            return null;
+        }
+
+        Vector3 start = CurrentSpriteOffset();
+        double spriteWidthPixels = spriteWidth * dpiScale;
+        double spriteHeightPixels = spriteHeight * dpiScale;
+        double minimumX = Math.Clamp((target.Left - virtualScreen.Left) / dpiScale,
+            0, Math.Max(0, ClientSize.Width / dpiScale - spriteWidth));
+        double maximumX = Math.Clamp((target.Right - virtualScreen.Left - spriteWidthPixels) / dpiScale,
+            minimumX, Math.Max(minimumX, ClientSize.Width / dpiScale - spriteWidth));
+        double targetX = minimumX + (maximumX - minimumX) / 2;
+        baseline = Math.Clamp((target.Bottom - virtualScreen.Top - spriteHeightPixels) / dpiScale,
+            0, Math.Max(0, ClientSize.Height / dpiScale - spriteHeight));
+        controller.SetMaximumLift(Math.Max(0, baseline));
+        controller.SetHorizontalBounds(targetX, targetX);
+        controller.ResetWandering();
+        controller.SetHorizontalBounds(minimumX, maximumX);
+
+        handoffWindowArrival = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        StartHandoffWindowJump(start, PositionOf(controller.Snapshot with { HopOffset = 0 }));
+        return handoffWindowArrival.Task;
+    }
+
+    private Task<long> BeginHandoffWindowVisitAfterChairHop(AssistantWindowBounds windowBounds)
+    {
+        TaskCompletionSource<long> completion =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        BeginChairHop(entering: false, async () =>
+        {
+            try
+            {
+                Task<long>? visit = BeginHandoffWindowVisit(windowBounds);
+                completion.SetResult(visit is null
+                    ? System.Diagnostics.Stopwatch.GetTimestamp()
+                    : await visit);
+            }
+            catch (Exception exception)
+            {
+                completion.SetException(exception);
+            }
+        });
+        return completion.Task;
+    }
+
+    private Task<long>? EndHandoffWindowVisit()
     {
         if (!visitingHandoffWindow || controller is null || sprite is null || compositor is null)
         {
-            return;
+            return null;
+        }
+
+        handoffTaskbarArrival ??= new(TaskCreationOptions.RunContinuationsAsynchronously);
+        if (handoffWindowJump is not null && !restoringTaskbarAfterHandoffJump)
+        {
+            endingHandoffWindowVisit = true;
+            return handoffTaskbarArrival.Task;
         }
 
         StopHandoffWindowJump();
@@ -592,6 +816,7 @@ internal sealed partial class ReplayWindow
             0);
         restoringTaskbarAfterHandoffJump = true;
         StartHandoffWindowJump(localStart, destination);
+        return handoffTaskbarArrival.Task;
     }
 
     private void StartHandoffWindowJump(Vector3 start, Vector3 destination)
@@ -674,6 +899,16 @@ internal sealed partial class ReplayWindow
         handoffWindowJump = null;
         batch.Dispose();
         modelTimestamp = System.Diagnostics.Stopwatch.GetTimestamp();
+        if (!restoringTaskbarAfterHandoffJump)
+        {
+            handoffWindowArrival?.TrySetResult(modelTimestamp);
+        }
+        if (endingHandoffWindowVisit && !restoringTaskbarAfterHandoffJump)
+        {
+            endingHandoffWindowVisit = false;
+            EndHandoffWindowVisit();
+            return;
+        }
         if (restoringTaskbarAfterHandoffJump)
         {
             restoringTaskbarAfterHandoffJump = false;
@@ -683,6 +918,7 @@ internal sealed partial class ReplayWindow
                 Bounds = handoffTaskbarBounds;
                 baseline = ClientSize.Height / dpiScale - spriteHeight;
                 taskbarLayer?.Reattach();
+                RelayoutSupply();
             }
             finally
             {
@@ -694,6 +930,10 @@ internal sealed partial class ReplayWindow
             controller.ResetWandering();
             controller.SetHorizontalBounds(0, maximumX);
             visitingHandoffWindow = false;
+            endingHandoffWindowVisit = false;
+            handoffWindowArrival = null;
+            handoffTaskbarArrival?.TrySetResult(modelTimestamp);
+            handoffTaskbarArrival = null;
         }
         sprite!.Offset = PositionOf(controller!.Snapshot);
         sprite.Scale = Vector3.One;
@@ -703,6 +943,14 @@ internal sealed partial class ReplayWindow
         {
             placementPending = false;
             QueuePlacementRefresh();
+        }
+        if (deferredHandoffPresent is { } handoff)
+        {
+            deferredHandoffPresent = null;
+            if (!sessionsStopping)
+            {
+                DropHandoffPresent(handoff);
+            }
         }
     }
 
@@ -718,6 +966,9 @@ internal sealed partial class ReplayWindow
             CompositionGetValueStatus.Succeeded
             ? offset
             : sprite.Offset;
+
+    private Vector3 CurrentRenderedBuddyOffset() =>
+        bubblePosition?.Position ?? CurrentSpriteOffset();
 
     private async Task FocusNextSessionAsync()
     {
@@ -872,6 +1123,80 @@ internal sealed partial class ReplayWindow
         }
     }
 
+    private async Task EditSettingsAsync()
+    {
+        if (SkillsBlocked)
+        {
+            return;
+        }
+        skillMenu.Hide();
+        AssistantLaunchCommand previousLaunch = sessionSettings.EffectiveCopilotLaunch;
+        string previousBuddy = BuddySpriteCatalog.Resolve(sessionSettings.Buddy).Name;
+        SettingsDialogResult? updated;
+        try
+        {
+            updated = CopilotSettingsDialog.Edit(this, dpiScale, previousLaunch, previousBuddy);
+        }
+        catch (InvalidOperationException exception)
+        {
+            ShowSessionError(exception.Message);
+            return;
+        }
+        if (updated is null)
+        {
+            return;
+        }
+        bool launchChanged =
+            !string.Equals(updated.CopilotLaunch.Executable, previousLaunch.Executable, StringComparison.Ordinal) ||
+            !updated.CopilotLaunch.Arguments.SequenceEqual(previousLaunch.Arguments, StringComparer.Ordinal);
+        if (launchChanged && assistantSessions is not IConfigurableAssistantSessions)
+        {
+            ShowSessionError("This assistant provider does not support launch settings.");
+            return;
+        }
+
+        try
+        {
+            if (launchChanged)
+            {
+                using CancellationTokenSource timeout =
+                    CancellationTokenSource.CreateLinkedTokenSource(sessionCancellation.Token);
+                timeout.CancelAfter(TimeSpan.FromSeconds(5));
+                await ((IConfigurableAssistantSessions)assistantSessions)
+                    .ConfigureLaunchAsync(updated.CopilotLaunch, timeout.Token);
+            }
+            sessionSettings.CopilotLaunch = updated.CopilotLaunch;
+            sessionSettings.CliPath = null;
+            sessionSettings.Buddy = updated.Buddy;
+            sessionSettings.Save();
+            if (!string.Equals(updated.Buddy, previousBuddy, StringComparison.OrdinalIgnoreCase))
+            {
+                LoadSpriteFrames();
+                ShowFrame(controller!.Snapshot.Frame);
+                UpdateContextSweat();
+            }
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or
+            InvalidOperationException or OperationCanceledException or ArgumentException)
+        {
+            if (launchChanged && assistantSessions is IConfigurableAssistantSessions configurable)
+            {
+                try
+                {
+                    using CancellationTokenSource rollback = new(TimeSpan.FromSeconds(2));
+                    await configurable.ConfigureLaunchAsync(previousLaunch, rollback.Token);
+                }
+                catch (Exception rollbackException)
+                {
+                    System.Diagnostics.Debug.WriteLine(rollbackException);
+                }
+            }
+            sessionSettings.CopilotLaunch = previousLaunch;
+            sessionSettings.Buddy = previousBuddy;
+            ShowSessionError($"Could not save settings: {exception.Message}");
+        }
+    }
+
     private void UpdateQueueOrbs()
     {
         if (queueOrbs is null)
@@ -926,7 +1251,7 @@ internal sealed partial class ReplayWindow
 
     private void Sparkle()
     {
-        if (sessionEffects is null || !controller!.IsVisible)
+        if (!buddyActive || sessionEffects is null || !controller!.IsVisible)
         {
             return;
         }
@@ -989,12 +1314,14 @@ internal sealed partial class ReplayWindow
     private void StopSessionIntegration()
     {
         sessionsStopping = true;
+        deferredHandoffPresent = null;
         StopSessionLaunchJump();
         if (hotkeyRegistered) UnregisterHotKey(Handle, OpenSessionHotkeyId);
         if (skillMenuHotkeyRegistered) UnregisterHotKey(Handle, SkillMenuHotkeyId);
         if (handoffHotkeyRegistered) UnregisterHotKey(Handle, HandoffHotkeyId);
         if (storeHotkeyRegistered) UnregisterHotKey(Handle, StoreHotkeyId);
         if (inquireHotkeyRegistered) UnregisterHotKey(Handle, InquireHotkeyId);
+        if (gatherHotkeyRegistered) UnregisterHotKey(Handle, GatherHotkeyId);
         sessionCancellation.Cancel();
         assistantSessions.AttentionRequested -= OnSessionAttention;
         assistantSessions.ContextUsageChanged -= OnContextUsageChanged;
@@ -1033,8 +1360,17 @@ internal sealed partial class ReplayWindow
 internal sealed class SessionSettings
 {
     public string Shortcut { get; set; } = "Alt+Enter";
+    public string Buddy { get; set; } = BuddySpriteCatalog.DefaultName;
     public string? WorkingDirectory { get; set; }
+    public AssistantLaunchCommand? CopilotLaunch { get; set; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? CliPath { get; set; }
+    [JsonIgnore]
+    public AssistantLaunchCommand EffectiveCopilotLaunch =>
+        CopilotLaunch ??
+        (!string.IsNullOrWhiteSpace(CliPath)
+            ? new AssistantLaunchCommand(CliPath, [])
+            : AssistantLaunchCommand.Default);
     private static string SettingsPath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "CopilotBuddy", "settings.json");
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web) { WriteIndented = true };
 

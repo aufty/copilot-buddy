@@ -2,19 +2,22 @@ using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.IO.Pipes;
 using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 
 namespace CopilotBuddy.Core;
 
 public static class AssistantBrokerProtocol
 {
-    public const int Version = 4;
-    public const string PipeName = "CopilotBuddy.AssistantBroker.v4";
+    public const int Version = 9;
+    public const string PipeName = "CopilotBuddy.AssistantBroker.v9";
     public const string Request = "request";
     public const string Response = "response";
     public const string Event = "event";
+    public const string ConfigureLaunch = "configure-launch";
     public const string Open = "open";
     public const string Focus = "focus";
+    public const string Gather = "gather";
     public const string CaptureSessionTarget = "capture-session-target";
     public const string InjectPrompt = "inject-prompt";
     public const string StartHandoff = "start-handoff";
@@ -43,10 +46,136 @@ public sealed record AssistantBrokerMessage(
 
 public sealed record BrokerOpenRequest(string WorkingDirectory);
 public sealed record BrokerFocusRequest(string SessionId);
-public sealed record BrokerInjectPromptRequest(string Prompt);
+public sealed record BrokerInjectPromptRequest(AssistantSessionTarget Target, string Prompt);
 public sealed record BrokerStartHandoffRequest(AssistantSessionTarget Target, HandoffRequest Request);
 
-public sealed class AssistantSessionBrokerClient : IStoredAssistantSessions
+public sealed record AssistantLaunchCommand(string Executable, string[] Arguments)
+{
+    public static AssistantLaunchCommand Default { get; } = new("copilot", []);
+
+    public static AssistantLaunchCommand Parse(string commandLine)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(commandLine);
+        List<string> arguments = [];
+        StringBuilder current = new();
+        bool quoted = false;
+        bool started = false;
+
+        for (int index = 0; index < commandLine.Length;)
+        {
+            char character = commandLine[index];
+            if (!quoted && char.IsWhiteSpace(character))
+            {
+                if (started)
+                {
+                    arguments.Add(current.ToString());
+                    current.Clear();
+                    started = false;
+                }
+                index++;
+                continue;
+            }
+
+            if (character == '\\')
+            {
+                int slashStart = index;
+                while (index < commandLine.Length && commandLine[index] == '\\')
+                {
+                    index++;
+                }
+                int slashCount = index - slashStart;
+                if (index < commandLine.Length && commandLine[index] == '"')
+                {
+                    current.Append('\\', slashCount / 2);
+                    if (slashCount % 2 == 0)
+                    {
+                        quoted = !quoted;
+                    }
+                    else
+                    {
+                        current.Append('"');
+                    }
+                    index++;
+                }
+                else
+                {
+                    current.Append('\\', slashCount);
+                }
+                started = true;
+                continue;
+            }
+
+            if (character == '"')
+            {
+                quoted = !quoted;
+                started = true;
+                index++;
+                continue;
+            }
+
+            current.Append(character);
+            started = true;
+            index++;
+        }
+
+        if (quoted)
+        {
+            throw new FormatException("The launch command contains an unmatched quote.");
+        }
+        if (started)
+        {
+            arguments.Add(current.ToString());
+        }
+        if (arguments.Count == 0 || string.IsNullOrWhiteSpace(arguments[0]))
+        {
+            throw new FormatException("Enter the executable used to launch Copilot.");
+        }
+        return new(arguments[0], arguments.Skip(1).ToArray());
+    }
+
+    public override string ToString() =>
+        string.Join(" ", new[] { Executable }.Concat(Arguments).Select(Quote));
+
+    private static string Quote(string value)
+    {
+        if (value.Length > 0 && !value.Any(character => char.IsWhiteSpace(character) || character == '"'))
+        {
+            return value;
+        }
+
+        StringBuilder quoted = new("\"");
+        int slashes = 0;
+        foreach (char character in value)
+        {
+            if (character == '\\')
+            {
+                slashes++;
+                continue;
+            }
+            if (character == '"')
+            {
+                quoted.Append('\\', slashes * 2 + 1);
+                quoted.Append('"');
+            }
+            else
+            {
+                quoted.Append('\\', slashes);
+                quoted.Append(character);
+            }
+            slashes = 0;
+        }
+        quoted.Append('\\', slashes * 2);
+        quoted.Append('"');
+        return quoted.ToString();
+    }
+}
+
+public interface IConfigurableAssistantSessions
+{
+    Task ConfigureLaunchAsync(AssistantLaunchCommand command, CancellationToken cancellationToken);
+}
+
+public sealed class AssistantSessionBrokerClient : IStoredAssistantSessions, IConfigurableAssistantSessions
 {
     private readonly NamedPipeClientStream pipe;
     private readonly StreamReader reader;
@@ -168,7 +297,6 @@ public sealed class AssistantSessionBrokerClient : IStoredAssistantSessions
 
     public static async Task<AssistantSessionBrokerClient> ConnectAsync(
         string executablePath,
-        string? cliPath,
         CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(executablePath);
@@ -182,11 +310,6 @@ public sealed class AssistantSessionBrokerClient : IStoredAssistantSessions
                 CreateNoWindow = true
             };
             start.ArgumentList.Add("--assistant-broker");
-            if (!string.IsNullOrWhiteSpace(cliPath))
-            {
-                start.ArgumentList.Add("--broker-cli-path");
-                start.ArgumentList.Add(cliPath);
-            }
             Process.Start(start)?.Dispose();
             DateTime deadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
             while (pipe is null && DateTime.UtcNow < deadline)
@@ -245,6 +368,12 @@ public sealed class AssistantSessionBrokerClient : IStoredAssistantSessions
         return Path.Combine(targetDirectory, Path.GetFileName(executablePath));
     }
 
+    public async Task ConfigureLaunchAsync(
+        AssistantLaunchCommand command,
+        CancellationToken cancellationToken) =>
+        await RequestAsync<AssistantLaunchCommand, bool>(
+            AssistantBrokerProtocol.ConfigureLaunch, command, cancellationToken);
+
     public async Task OpenAsync(string workingDirectory, CancellationToken cancellationToken) =>
         await RequestAsync<BrokerOpenRequest, bool>(
             AssistantBrokerProtocol.Open, new(workingDirectory), cancellationToken);
@@ -253,15 +382,22 @@ public sealed class AssistantSessionBrokerClient : IStoredAssistantSessions
         RequestAsync<BrokerFocusRequest, bool>(
             AssistantBrokerProtocol.Focus, new(sessionId), cancellationToken);
 
+    public Task<AssistantGatherResult> GatherAsync(
+        AssistantWindowBounds workArea,
+        CancellationToken cancellationToken) =>
+        RequestAsync<AssistantWindowBounds, AssistantGatherResult>(
+            AssistantBrokerProtocol.Gather, workArea, cancellationToken);
+
     public Task<AssistantSessionTarget?> CaptureSessionTargetAsync(CancellationToken cancellationToken) =>
         RequestAsync<object, AssistantSessionTarget?>(
             AssistantBrokerProtocol.CaptureSessionTarget, new(), cancellationToken);
 
     public Task<AssistantPromptInjection?> InjectPromptAsync(
+        AssistantSessionTarget target,
         string prompt,
         CancellationToken cancellationToken) =>
         RequestAsync<BrokerInjectPromptRequest, AssistantPromptInjection?>(
-            AssistantBrokerProtocol.InjectPrompt, new(prompt), cancellationToken);
+            AssistantBrokerProtocol.InjectPrompt, new(target, prompt), cancellationToken);
 
     public Task<AssistantHandoff?> StartHandoffAsync(
         AssistantSessionTarget target,

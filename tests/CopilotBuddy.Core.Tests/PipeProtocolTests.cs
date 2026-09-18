@@ -31,6 +31,90 @@ public sealed class PipeProtocolTests
     }
 
     [Fact]
+    public void AssistantBrokerMessagesRoundTripPromptTargets()
+    {
+        BrokerInjectPromptRequest payload = new(
+            new AssistantSessionTarget("terminal/session", new AssistantWindowBounds(100, 200, 1200, 800)),
+            "Ask every unblocked question.");
+        AssistantBrokerMessage message = new(
+            AssistantBrokerProtocol.Version,
+            AssistantBrokerProtocol.Request,
+            Guid.NewGuid(),
+            AssistantBrokerProtocol.InjectPrompt,
+            Payload: JsonSerializer.SerializeToElement(payload, PipeProtocol.JsonOptions));
+
+        string json = JsonSerializer.Serialize(message, PipeProtocol.JsonOptions);
+        AssistantBrokerMessage restored = JsonSerializer.Deserialize<AssistantBrokerMessage>(
+            json, PipeProtocol.JsonOptions)!;
+        BrokerInjectPromptRequest restoredPayload =
+            restored.Payload!.Value.Deserialize<BrokerInjectPromptRequest>(PipeProtocol.JsonOptions)!;
+
+        Assert.Equal(payload, restoredPayload);
+    }
+
+    [Fact]
+    public void AssistantBrokerMessagesRoundTripLaunchCommands()
+    {
+        AssistantLaunchCommand payload = new("custom-launcher", ["copilot", "--custom-option"]);
+        AssistantBrokerMessage message = new(
+            AssistantBrokerProtocol.Version,
+            AssistantBrokerProtocol.Request,
+            Guid.NewGuid(),
+            AssistantBrokerProtocol.ConfigureLaunch,
+            Payload: JsonSerializer.SerializeToElement(payload, PipeProtocol.JsonOptions));
+
+        string json = JsonSerializer.Serialize(message, PipeProtocol.JsonOptions);
+        AssistantBrokerMessage restored = JsonSerializer.Deserialize<AssistantBrokerMessage>(
+            json, PipeProtocol.JsonOptions)!;
+        AssistantLaunchCommand restoredPayload =
+            restored.Payload!.Value.Deserialize<AssistantLaunchCommand>(PipeProtocol.JsonOptions)!;
+
+        Assert.Equal(payload.Executable, restoredPayload.Executable);
+        Assert.Equal(payload.Arguments, restoredPayload.Arguments);
+    }
+
+    [Fact]
+    public void AssistantBrokerMessagesRoundTripGatherWorkAreas()
+    {
+        AssistantWindowBounds payload = new(0, 0, 1920, 1040);
+        AssistantBrokerMessage message = new(
+            AssistantBrokerProtocol.Version,
+            AssistantBrokerProtocol.Request,
+            Guid.NewGuid(),
+            AssistantBrokerProtocol.Gather,
+            Payload: JsonSerializer.SerializeToElement(payload, PipeProtocol.JsonOptions));
+
+        string json = JsonSerializer.Serialize(message, PipeProtocol.JsonOptions);
+        AssistantBrokerMessage restored = JsonSerializer.Deserialize<AssistantBrokerMessage>(
+            json, PipeProtocol.JsonOptions)!;
+        AssistantWindowBounds restoredPayload =
+            restored.Payload!.Value.Deserialize<AssistantWindowBounds>(PipeProtocol.JsonOptions)!;
+
+        Assert.Equal(payload, restoredPayload);
+    }
+
+    [Fact]
+    public void AssistantBrokerMessagesRoundTripGatherResults()
+    {
+        AssistantGatherResult payload = new(
+            [new AssistantWindowBounds(0, 0, 960, 1040), new AssistantWindowBounds(960, 0, 960, 1040)]);
+        AssistantBrokerMessage message = new(
+            AssistantBrokerProtocol.Version,
+            AssistantBrokerProtocol.Response,
+            Guid.NewGuid(),
+            AssistantBrokerProtocol.Gather,
+            Payload: JsonSerializer.SerializeToElement(payload, PipeProtocol.JsonOptions));
+
+        string json = JsonSerializer.Serialize(message, PipeProtocol.JsonOptions);
+        AssistantBrokerMessage restored = JsonSerializer.Deserialize<AssistantBrokerMessage>(
+            json, PipeProtocol.JsonOptions)!;
+        AssistantGatherResult restoredPayload =
+            restored.Payload!.Value.Deserialize<AssistantGatherResult>(PipeProtocol.JsonOptions)!;
+
+        Assert.Equal(payload.Windows, restoredPayload.Windows);
+    }
+
+    [Fact]
     public void RequestRoundTripsMultilineText()
     {
         PresentationRequest request = new(PipeProtocol.Version, PipeProtocol.Show, "First line\nSecond line");

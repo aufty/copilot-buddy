@@ -339,6 +339,21 @@ public sealed class PresentationController : IPresentationApi
         breathingElapsed = 0;
     }
 
+    public void PlaceAt(double x)
+    {
+        if (!double.IsFinite(x))
+        {
+            throw new ArgumentOutOfRangeException(nameof(x));
+        }
+        if (isDragging || isAirborne || isLanding)
+        {
+            return;
+        }
+        wander.PlaceAt(x);
+        wander.StartNewIdle();
+        breathingElapsed = 0;
+    }
+
     public PassiveMotionPlan? PlanPassiveMotion()
     {
         if (!IsVisible || isDragging || isAirborne || isLanding || isHovered || Message is not null)

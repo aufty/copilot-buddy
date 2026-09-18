@@ -54,6 +54,7 @@ internal sealed partial class ReplayWindow
             presentation.Attention.ReducedMotion);
         handoffPresent.Opened += OnPresentOpened;
         handoffPresent.MotionCompleted += OnPresentMotionCompleted;
+        handoffPresent.SetPaused(!buddyActive);
         presentBubble ??= CreatePresentBubble();
         StartSessionLaunchJump();
         UpdatePointerRouting();
@@ -84,6 +85,7 @@ internal sealed partial class ReplayWindow
             spriteWidth,
             presentation.Attention.ReducedMotion,
             readyInitially: true);
+        present.SetPaused(!buddyActive);
         present.Opened += OnPresentOpened;
         present.MotionCompleted += OnPresentMotionCompleted;
         storedPresents[storedSession.SessionId] = new(storedSession, present);
@@ -111,6 +113,7 @@ internal sealed partial class ReplayWindow
             spriteWidth,
             presentation.Attention.ReducedMotion,
             forceRainbow: true);
+        handoffPresent.SetPaused(!buddyActive);
         handoffPresent.MotionCompleted += OnPresentMotionCompleted;
         StartSessionLaunchJump();
         UpdatePointerRouting();
@@ -119,7 +122,7 @@ internal sealed partial class ReplayWindow
 
     private void CheckPresentReadiness()
     {
-        if (handoffPresent is null || !handoffPresent.CheckReady())
+        if (!buddyActive || handoffPresent is null || !handoffPresent.CheckReady())
         {
             return;
         }
