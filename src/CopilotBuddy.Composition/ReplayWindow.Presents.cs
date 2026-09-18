@@ -94,32 +94,6 @@ internal sealed partial class ReplayWindow
         UpdatePointerRouting();
     }
 
-    private bool DropRainbowPresent()
-    {
-        if (handoffPresent is not null)
-        {
-            return false;
-        }
-        PresentationSnapshot snapshot = controller!.Snapshot;
-        handoffPresent = new ArtifactPresent(
-            compositor!,
-            root!,
-            Path.Combine(AppContext.BaseDirectory, "Assets", "Sprites", "present.png"),
-            Path.Combine(Path.GetTempPath(), $"copilot-buddy-rainbow-{Guid.NewGuid():N}"),
-            "Rainbow",
-            dpiScale,
-            ClientSize,
-            snapshot.X,
-            spriteWidth,
-            presentation.Attention.ReducedMotion,
-            forceRainbow: true);
-        handoffPresent.SetPaused(!buddyActive);
-        handoffPresent.MotionCompleted += OnPresentMotionCompleted;
-        StartSessionLaunchJump();
-        UpdatePointerRouting();
-        return true;
-    }
-
     private void CheckPresentReadiness()
     {
         if (!buddyActive || handoffPresent is null || !handoffPresent.CheckReady())

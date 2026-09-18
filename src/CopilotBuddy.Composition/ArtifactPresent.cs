@@ -52,14 +52,13 @@ internal sealed class ArtifactPresent : IDisposable
         double buddyXDip,
         double buddyWidthDip,
         bool reducedMotion,
-        bool? forceRainbow = null,
         bool readyInitially = false)
     {
         this.compositor = compositor;
         this.parent = parent;
         this.spritePath = spritePath;
         this.reducedMotion = reducedMotion;
-        rainbow = forceRainbow ?? Random.Shared.Next(9) == 0;
+        rainbow = Random.Shared.Next(9) == 0;
         ArtifactPath = artifactPath;
         Label = label;
         IsReady = readyInitially;

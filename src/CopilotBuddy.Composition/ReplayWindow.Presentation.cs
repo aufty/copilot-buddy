@@ -92,8 +92,6 @@ internal sealed partial class ReplayWindow
                 PipeProtocol.Show or PipeProtocol.Dismiss => null,
                 PipeProtocol.Visible when request.Visible is null => "The visible command requires a boolean value.",
                 PipeProtocol.Visible => null,
-                PipeProtocol.RainbowPresent when handoffPresent is not null => "Open the current handoff present before dropping another present.",
-                PipeProtocol.RainbowPresent => null,
                 _ => $"Unknown presentation command '{request.Command}'."
             };
         if (error is not null)
@@ -112,12 +110,6 @@ internal sealed partial class ReplayWindow
                     break;
                 case PipeProtocol.Visible:
                     ChangeVisibility(request.Visible!.Value);
-                    break;
-                case PipeProtocol.RainbowPresent:
-                    if (!DropRainbowPresent())
-                    {
-                        throw new InvalidOperationException("A handoff present is already active.");
-                    }
                     break;
             }
         }, pipeCancellation.Token);

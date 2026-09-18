@@ -10,7 +10,6 @@ public static class PipeProtocol
     public const string Show = "show";
     public const string Dismiss = "dismiss";
     public const string Visible = "visible";
-    public const string RainbowPresent = "rainbow-present";
 
     public static JsonSerializerOptions JsonOptions { get; } = new()
     {
