@@ -96,6 +96,7 @@ internal sealed partial class ReplayWindow : Form
     private readonly Dictionary<SpriteFrame, ContainerVisual> frameVisuals = [];
     private readonly Dictionary<SpriteFrame, bool[,]> frameMasks = [];
     private readonly System.Windows.Forms.Timer passiveTimer = new();
+    private PassiveMotionPlan? activePassiveMotion;
     private readonly System.Windows.Forms.Timer pointerTimer = new() { Interval = 20 };
     private readonly ContextMenuStrip exitMenu = new();
     private NotifyIcon? trayIcon;
@@ -383,19 +384,24 @@ internal sealed partial class ReplayWindow : Form
         {
             if (current.State == VisualState.Idle)
             {
-                sprite!.StopAnimation(nameof(sprite.Offset));
-                sprite.Offset = PositionOf(current);
-                ShowFrame(SpriteFrame.Standing);
-                StartBreathing();
+                SettlePassiveMotion(current);
             }
             return;
         }
         TimeSpan duration = plan.Value.Duration < TimeSpan.FromMilliseconds(1) ? TimeSpan.FromMilliseconds(1) : plan.Value.Duration;
+        if (current.State == VisualState.Idle)
+        {
+            SettlePassiveMotion(current);
+            passiveTimer.Interval = (int)Math.Clamp(Math.Ceiling(duration.TotalMilliseconds) + 1, 1, int.MaxValue);
+            passiveTimer.Start();
+            return;
+        }
         using Vector3KeyFrameAnimation movement = compositor!.CreateVector3KeyFrameAnimation();
         using LinearEasingFunction easing = compositor.CreateLinearEasingFunction();
         movement.Duration = duration;
         movement.InsertExpressionKeyFrame(0, "this.StartingValue");
         movement.InsertKeyFrame(1, PositionOf(plan.Value.End), easing);
+        activePassiveMotion = plan;
         sprite!.StartAnimation(nameof(sprite.Offset), movement);
         ShowFrame(current.Frame);
         if (current.State == VisualState.Walking)
@@ -404,12 +410,23 @@ internal sealed partial class ReplayWindow : Form
             sprite.Scale = Vector3.One;
             StartWalkingFrames(current.Frame is SpriteFrame.WalkLeft1 or SpriteFrame.WalkLeft2);
         }
-        else
-        {
-            StartBreathing();
-        }
         passiveTimer.Interval = (int)Math.Clamp(Math.Ceiling(duration.TotalMilliseconds) + 1, 1, int.MaxValue);
         passiveTimer.Start();
+    }
+
+    private void SettlePassiveMotion(PresentationSnapshot current, bool useRenderedPosition = false)
+    {
+        double settledX = current.X;
+        if (activePassiveMotion is { } motion)
+        {
+            settledX = useRenderedPosition ? CurrentRenderedBuddyOffset().X / dpiScale : motion.End.X;
+        }
+        activePassiveMotion = null;
+        controller!.PlaceAt(settledX);
+        sprite!.StopAnimation(nameof(sprite.Offset));
+        sprite.Offset = PositionOf(controller.Snapshot);
+        ShowFrame(SpriteFrame.Standing);
+        StartBreathing();
     }
 
     private void StartWalkingFrames(bool left)
@@ -560,7 +577,8 @@ internal sealed partial class ReplayWindow : Form
         {
             return false;
         }
-        if ((attentionBounce is not null || supplyRetrieval is not null || chairHop is not null) &&
+        if ((activePassiveMotion is not null || attentionBounce is not null ||
+            supplyRetrieval is not null || chairHop is not null) &&
             bubblePosition is not null)
         {
             Vector3 position = bubblePosition.Position;
@@ -942,8 +960,21 @@ internal sealed partial class ReplayWindow : Form
         if (hovered != interactionHold)
         {
             RecordDragTrace(interactionHold ? "hover-enter" : "hover-leave");
+            bool wasHovered = hovered;
             hovered = interactionHold;
+            if (wasHovered && !interactionHold && activePassiveMotion is not null)
+            {
+                SettlePassiveMotion(controller.Snapshot, useRenderedPosition: true);
+            }
             controller.SetHovered(interactionHold);
+            if (interactionHold && activePassiveMotion is not null)
+            {
+                passiveTimer.Stop();
+                SetAnimationPaused(sprite!, nameof(sprite.Offset), paused: true);
+                ShowFrame(SpriteFrame.Standing);
+                StartBreathing();
+                return;
+            }
             if (supplyRetrieval is null && chairHop is null &&
                 controller.Snapshot.State is VisualState.Idle or VisualState.Walking)
             {
