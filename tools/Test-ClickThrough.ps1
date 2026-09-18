@@ -1,5 +1,5 @@
 param(
-    [string]$Executable = "$PSScriptRoot\..\artifacts\click-through\TaskbarBuddy.Composition.exe"
+    [string]$Executable = "$PSScriptRoot\..\artifacts\click-through\CopilotBuddy.Composition.exe"
 )
 
 $ErrorActionPreference = 'Stop'
@@ -33,7 +33,7 @@ public static class ClickThroughCheck
         using (Form underlay = new Form())
         using (Timer timer = new Timer())
         {
-            underlay.Text = "Taskbar Buddy click-through check";
+            underlay.Text = "Copilot Buddy click-through check";
             underlay.FormBorderStyle = FormBorderStyle.None;
             underlay.StartPosition = FormStartPosition.Manual;
             underlay.Bounds = new Rectangle(workArea.Left, workArea.Bottom - 160, workArea.Width, 160);
@@ -52,7 +52,7 @@ public static class ClickThroughCheck
                 {
                     buddy.Refresh();
                     if (buddy.HasExited) throw new Exception("Overlay exited before the check.");
-                    IntPtr overlay = FindWindow(null, "Taskbar Buddy - Composition drag trial");
+                    IntPtr overlay = FindWindow(null, "Copilot Buddy - Composition drag trial");
                     if (overlay == IntPtr.Zero) throw new Exception("Overlay has no window.");
                     if (phase == 0)
                     {
@@ -119,7 +119,7 @@ public static class ClickThroughCheck
                 {
                     if (!buddy.HasExited)
                     {
-                        SendMessage(FindWindow(null, "Taskbar Buddy - Composition drag trial"), 0x10, IntPtr.Zero, IntPtr.Zero);
+                        SendMessage(FindWindow(null, "Copilot Buddy - Composition drag trial"), 0x10, IntPtr.Zero, IntPtr.Zero);
                         if (!buddy.WaitForExit(3000)) buddy.Kill();
                     }
                     buddy.Dispose();

@@ -4,7 +4,7 @@
 		{
 			"label": "Verify Copilot attachment authentication",
 			"type": "shell",
-			"command": "$ErrorActionPreference = 'Stop'\n$attached = Get-ChildItem (Join-Path $env:LOCALAPPDATA 'TaskbarBuddy/connections/*.json') | Sort-Object LastWriteTime -Descending | ForEach-Object { Get-Content $_.FullName -Raw | ConvertFrom-Json } | Where-Object { $_.stage -eq 'attached' -and $_.port -and (Get-Process -Id $_.processId -ErrorAction SilentlyContinue) } | Select-Object -First 1\nif (-not $attached) { throw 'No live successful attachment diagnostic exists.' }\n& 'C:/Program Files/dotnet/dotnet.exe' run --file tools/Test-CopilotAuthentication.cs -- $attached.port\nexit $LASTEXITCODE",
+			"command": "$ErrorActionPreference = 'Stop'\n$attached = Get-ChildItem (Join-Path $env:LOCALAPPDATA 'CopilotBuddy/connections/*.json') | Sort-Object LastWriteTime -Descending | ForEach-Object { Get-Content $_.FullName -Raw | ConvertFrom-Json } | Where-Object { $_.stage -eq 'attached' -and $_.port -and (Get-Process -Id $_.processId -ErrorAction SilentlyContinue) } | Select-Object -First 1\nif (-not $attached) { throw 'No live successful attachment diagnostic exists.' }\n& 'C:/Program Files/dotnet/dotnet.exe' run --file tools/Test-CopilotAuthentication.cs -- $attached.port\nexit $LASTEXITCODE",
 			"options": {
 				"cwd": "${workspaceFolder}"
 			},
@@ -14,7 +14,7 @@
 		{
 			"label": "Try Copilot attachment once",
 			"type": "shell",
-			"command": "$ErrorActionPreference = 'Stop'\nif (Get-Process -Name TaskbarBuddy.Composition -ErrorAction SilentlyContinue) { throw 'Exit the running buddy before this one-shot launch.' }\n$buddy = Start-Process -FilePath './artifacts/attach-fix/TaskbarBuddy.Composition.exe' -ArgumentList '--open-copilot' -WorkingDirectory $PWD.Path -PassThru\nif (-not $buddy.WaitForInputIdle(10000)) { throw 'Buddy UI did not become ready.' }\nWrite-Host ('Started buddy PID ' + $buddy.Id + ' with one Copilot launch requested.')",
+			"command": "$ErrorActionPreference = 'Stop'\nif (Get-Process -Name CopilotBuddy.Composition -ErrorAction SilentlyContinue) { throw 'Exit the running buddy before this one-shot launch.' }\n$buddy = Start-Process -FilePath './artifacts/attach-fix/CopilotBuddy.Composition.exe' -ArgumentList '--open-copilot' -WorkingDirectory $PWD.Path -PassThru\nif (-not $buddy.WaitForInputIdle(10000)) { throw 'Buddy UI did not become ready.' }\nWrite-Host ('Started buddy PID ' + $buddy.Id + ' with one Copilot launch requested.')",
 			"options": {
 				"cwd": "${workspaceFolder}"
 			},
@@ -31,7 +31,7 @@
 		{
 			"label": "Build Copilot attachment fix",
 			"type": "shell",
-			"command": "$ErrorActionPreference = 'Stop'\n$outputExe = [IO.Path]::GetFullPath('artifacts/attach-fix/TaskbarBuddy.Composition.exe')\nGet-Process -Name TaskbarBuddy.Composition -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $outputExe } | ForEach-Object {\n    Write-Host ('Stopping build-output buddy PID ' + $_.Id)\n    $_.Kill()\n    if (-not $_.WaitForExit(5000)) { throw 'Buddy did not exit; build cancelled.' }\n}\n& 'C:\\Program Files\\dotnet\\dotnet.exe' build src/TaskbarBuddy.Composition --no-restore -o artifacts/attach-fix\nexit $LASTEXITCODE",
+			"command": "$ErrorActionPreference = 'Stop'\n$outputExe = [IO.Path]::GetFullPath('artifacts/attach-fix/CopilotBuddy.Composition.exe')\nGet-Process -Name CopilotBuddy.Composition -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $outputExe } | ForEach-Object {\n    Write-Host ('Stopping build-output buddy PID ' + $_.Id)\n    $_.Kill()\n    if (-not $_.WaitForExit(5000)) { throw 'Buddy did not exit; build cancelled.' }\n}\n& 'C:\\Program Files\\dotnet\\dotnet.exe' build src/CopilotBuddy.Composition --no-restore -o artifacts/attach-fix\nexit $LASTEXITCODE",
 			"options": {
 				"cwd": "${workspaceFolder}"
 			},
@@ -43,7 +43,7 @@
 		{
 			"label": "Test buddy core",
 			"type": "shell",
-			"command": "& 'C:/Program Files/dotnet/dotnet.exe' test tests/TaskbarBuddy.Core.Tests --no-restore",
+			"command": "& 'C:/Program Files/dotnet/dotnet.exe' test tests/CopilotBuddy.Core.Tests --no-restore",
 			"isBackground": false,
 			"problemMatcher": [
 				"$msCompile"

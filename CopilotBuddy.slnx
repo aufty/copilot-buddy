@@ -1,0 +1,11 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/CopilotBuddy.Cli/CopilotBuddy.Cli.csproj" />
+    <Project Path="src/CopilotBuddy.Core/CopilotBuddy.Core.csproj" />
+    <Project Path="src/CopilotBuddy.Copilot/CopilotBuddy.Copilot.csproj" />
+    <Project Path="src/CopilotBuddy.Composition/CopilotBuddy.Composition.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/CopilotBuddy.Core.Tests/CopilotBuddy.Core.Tests.csproj" />
+  </Folder>
+</Solution>

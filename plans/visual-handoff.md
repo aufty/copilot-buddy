@@ -1,4 +1,4 @@
-thei# Taskbar Buddy: Visual Handoff
+# Copilot Buddy: Visual Handoff
 
 ## Scope
 
@@ -67,18 +67,18 @@ The speech bubble appears above and near the buddy without covering it. It grows
 Provide a small companion CLI that sends commands to the running presentation host over a local named pipe:
 
 ```text
-buddyctl show "Build needs your approval"
-buddyctl dismiss
-buddyctl visible on
-buddyctl visible off
+copilot-buddyctl show "Build needs your approval"
+copilot-buddyctl dismiss
+copilot-buddyctl visible on
+copilot-buddyctl visible off
 ```
 
 `show` must demonstrate the complete first iteration: wandering pauses, the adaptive speech bubble appears, and the buddy waves and hops. The protocol should express presentation commands only so future Copilot events can map onto the same API.
 
 ## First-Iteration Acceptance
 
-- Buddy wanders naturally along the taskbar and alternates between walking and idle.
-- Buddy stays aligned after taskbar/display changes and cannot leave visible bounds.
-- `buddyctl show <text>` produces a correctly sized, on-screen bubble and attention animation.
-- `buddyctl dismiss` removes the bubble and returns the buddy to wandering.
+- Copilot Buddy wanders naturally along the taskbar and alternates between walking and idle.
+- Copilot Buddy stays aligned after taskbar/display changes and cannot leave visible bounds.
+- `copilot-buddyctl show <text>` produces a correctly sized, on-screen bubble and attention animation.
+- `copilot-buddyctl dismiss` removes the bubble and returns the buddy to wandering.
 - Left and right clicks are detected without making the entire overlay intercept clicks.

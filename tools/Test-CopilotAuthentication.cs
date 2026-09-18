@@ -10,7 +10,7 @@ if (args.Length != 1 || !int.TryParse(args[0], out int port) || port is < 1 or >
 
 CopilotClient client = new(new CopilotClientOptions
 {
-    Connection = RuntimeConnection.ForUri($"127.0.0.1:{port}", "taskbar-buddy-intentionally-invalid-token")
+    Connection = RuntimeConnection.ForUri($"127.0.0.1:{port}", "copilot-buddy-intentionally-invalid-token")
 });
 using CancellationTokenSource deadline = new(TimeSpan.FromSeconds(3));
 try

@@ -1,11 +1,11 @@
-#:project ../src/TaskbarBuddy.Composition/TaskbarBuddy.Composition.csproj
+#:project ../src/CopilotBuddy.Composition/CopilotBuddy.Composition.csproj
 #:property TargetFramework=net10.0-windows10.0.22000.0
 #:property UseWindowsForms=true
 #:property PublishAot=false
 #:property CopilotSkipCliDownload=true
 
 using System.Reflection;
-using TaskbarBuddy.Core;
+using CopilotBuddy.Core;
 
 internal static class ContextPressureSmoke
 {
@@ -15,9 +15,9 @@ internal static class ContextPressureSmoke
         if (!args.Contains("--windowed")) throw new ArgumentException("Run with --windowed.");
         ApplicationConfiguration.Initialize();
         Application.SetUnhandledExceptionMode(UnhandledExceptionMode.ThrowException);
-        Assembly host = Assembly.Load("TaskbarBuddy.Composition");
-        Type windowType = host.GetType("TaskbarBuddy.Composition.ReplayWindow", true)!;
-        object settings = Activator.CreateInstance(host.GetType("TaskbarBuddy.Composition.SessionSettings", true)!)!;
+        Assembly host = Assembly.Load("CopilotBuddy.Composition");
+        Type windowType = host.GetType("CopilotBuddy.Composition.ReplayWindow", true)!;
+        object settings = Activator.CreateInstance(host.GetType("CopilotBuddy.Composition.SessionSettings", true)!)!;
         FakeSessions sessions = new();
         using Form window = (Form)Activator.CreateInstance(windowType, sessions, settings)!;
         using System.Windows.Forms.Timer timer = new() { Interval = 200 };
@@ -136,8 +136,12 @@ internal static class ContextPressureSmoke
             Focused.Add(sessionId);
             return Task.FromResult(CanFocus);
         }
-        public Task<AssistantSessionTarget?> CaptureHandoffTargetAsync(CancellationToken cancellationToken) =>
+        public Task<AssistantSessionTarget?> CaptureSessionTargetAsync(CancellationToken cancellationToken) =>
             Task.FromResult<AssistantSessionTarget?>(null);
+        public Task<AssistantPromptInjection?> InjectPromptAsync(
+            string prompt,
+            CancellationToken cancellationToken) =>
+            Task.FromResult<AssistantPromptInjection?>(null);
         public Task<AssistantHandoff?> StartHandoffAsync(
             AssistantSessionTarget target,
             HandoffRequest request,
