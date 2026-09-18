@@ -24,6 +24,7 @@ internal sealed class ArtifactPresent : IDisposable
     private readonly ContainerVisual parent;
     private readonly string spritePath;
     private readonly bool rainbow;
+    private readonly bool reducedMotion;
     private readonly Windows.UI.Color color = PresetColors[Random.Shared.Next(PresetColors.Length)];
     private readonly List<CompositionObject> resources = [];
     private ContainerVisual root;
@@ -57,6 +58,7 @@ internal sealed class ArtifactPresent : IDisposable
         this.compositor = compositor;
         this.parent = parent;
         this.spritePath = spritePath;
+        this.reducedMotion = reducedMotion;
         rainbow = forceRainbow ?? Random.Shared.Next(9) == 0;
         ArtifactPath = artifactPath;
         Label = label;
@@ -136,6 +138,8 @@ internal sealed class ArtifactPresent : IDisposable
             (float)physics.Gravity * dpiScale,
             (float)physics.WallRestitution,
             direct,
+            new Vector2(point.X, point.Y) - new Vector2(position.X, position.Y),
+            !reducedMotion,
             dispatch,
             OnDragPose);
     }
@@ -152,6 +156,8 @@ internal sealed class ArtifactPresent : IDisposable
             new Vector3(Math.Max(0, clientSize.Width - root.Size.X), Math.Max(0, clientSize.Height - root.Size.Y), 0));
         dragMotion.SetTarget(target);
     }
+
+    public void TickDrag() => dragMotion?.Tick();
 
     public void ReleaseDrag()
     {

@@ -641,7 +641,8 @@ internal sealed partial class ReplayWindow : Form
             new Vector3(Math.Max(0, ClientSize.Width - (float)spriteWidth * dpiScale), (float)baseline * dpiScale, 0),
             presentation.Physics.DragResponseSeconds, (float)presentation.Physics.MaximumReleaseSpeed * dpiScale,
             (float)presentation.Physics.Gravity * dpiScale, (float)presentation.Physics.WallRestitution,
-            directDrag, DispatchNativeDrag, OnNativeDragPose);
+            directDrag, new Vector2(point.X, point.Y) - new Vector2(dragTarget.X, dragTarget.Y),
+            !presentation.Attention.ReducedMotion, DispatchNativeDrag, OnNativeDragPose);
         RecordDragTrace(directDrag ? "direct-drag-started" : "native-spring-started");
         inputTimer.Start();
     }
@@ -664,6 +665,14 @@ internal sealed partial class ReplayWindow : Form
 
     private void FlushPointer()
     {
+        if (presentDragging)
+        {
+            pressedPresent?.TickDrag();
+        }
+        else if (dragging)
+        {
+            nativeDrag?.Tick();
+        }
         if (!pointerPending)
         {
             return;
