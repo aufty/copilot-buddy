@@ -8,8 +8,8 @@ namespace CopilotBuddy.Core;
 
 public static class AssistantBrokerProtocol
 {
-    public const int Version = 3;
-    public const string PipeName = "CopilotBuddy.AssistantBroker.v3";
+    public const int Version = 4;
+    public const string PipeName = "CopilotBuddy.AssistantBroker.v4";
     public const string Request = "request";
     public const string Response = "response";
     public const string Event = "event";

@@ -9,7 +9,7 @@ public sealed class PipeProtocolTests
     public void AssistantBrokerMessagesRoundTripHandoffRequests()
     {
         BrokerStartHandoffRequest payload = new(
-            new AssistantSessionTarget("terminal/session"),
+            new AssistantSessionTarget("terminal/session", new AssistantWindowBounds(100, 200, 1200, 800)),
             new HandoffRequest(HandoffOutput.ImplementationInstructions));
         AssistantBrokerMessage message = new(
             AssistantBrokerProtocol.Version,
@@ -26,6 +26,7 @@ public sealed class PipeProtocolTests
 
         Assert.Equal(message.Id, restored.Id);
         Assert.Equal("terminal/session", restoredPayload.Target.SessionId);
+        Assert.Equal(new AssistantWindowBounds(100, 200, 1200, 800), restoredPayload.Target.WindowBounds);
         Assert.Equal(HandoffOutput.ImplementationInstructions, restoredPayload.Request.Output);
     }
 

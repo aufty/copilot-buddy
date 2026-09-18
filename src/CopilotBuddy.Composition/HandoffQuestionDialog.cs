@@ -13,17 +13,17 @@ internal sealed class HandoffQuestionDialog : Form
     private static readonly Color AccentColor = Color.FromArgb(91, 216, 211);
     private static readonly Color HighlightColor = Color.FromArgb(255, 203, 77);
     private readonly PrivateFontCollection fonts = new();
-    private readonly RadioButton specification = new()
-        { Text = "1. Specification - requirements and constraints" };
-    private readonly RadioButton research = new()
-        { Text = "2. Research - questions and sources" };
-    private readonly RadioButton implementation = new()
-        { Text = "3. Implementation - files and steps" };
-    private readonly RadioButton custom = new() { Text = "4. Something else" };
+    private readonly HandoffOptionButton specification =
+        new("1", "Specification - requirements and constraints");
+    private readonly HandoffOptionButton research =
+        new("2", "Research - questions and sources");
+    private readonly HandoffOptionButton implementation =
+        new("3", "Implementation - files and steps");
+    private readonly HandoffOptionButton custom = new("4", "Something else");
     private readonly TextBox customText = new() { Multiline = true, Enabled = false };
     private readonly Button continueButton = new() { Text = "Continue" };
 
-    private HandoffQuestionDialog(float dpiScale)
+    private HandoffQuestionDialog(float dpiScale, AssistantWindowBounds? targetBounds)
     {
         fonts.AddFontFile(Path.Combine(AppContext.BaseDirectory, "Assets", "Fonts", "VT323-Regular.ttf"));
         float scale = Math.Max(1, dpiScale);
@@ -31,7 +31,8 @@ internal sealed class HandoffQuestionDialog : Form
         Text = "Handoff";
         AccessibleName = "Handoff output question";
         FormBorderStyle = FormBorderStyle.None;
-        StartPosition = FormStartPosition.CenterParent;
+        bool centerOnTarget = targetBounds is { Width: > 0, Height: > 0 };
+        StartPosition = centerOnTarget ? FormStartPosition.Manual : FormStartPosition.CenterParent;
         AutoScaleMode = AutoScaleMode.None;
         KeyPreview = true;
         DoubleBuffered = true;
@@ -42,6 +43,15 @@ internal sealed class HandoffQuestionDialog : Form
         BackColor = Color.FromArgb(31, 29, 38);
         ForeColor = Color.FromArgb(247, 244, 231);
         ClientSize = new Size((int)(590 * scale), (int)(430 * scale));
+        if (centerOnTarget)
+        {
+            AssistantWindowBounds bounds = targetBounds!;
+            Rectangle target = new(bounds.Left, bounds.Top, bounds.Width, bounds.Height);
+            Rectangle area = Screen.FromRectangle(target).WorkingArea;
+            Location = new Point(
+                Math.Clamp(target.Left + (target.Width - Width) / 2, area.Left, Math.Max(area.Left, area.Right - Width)),
+                Math.Clamp(target.Top + (target.Height - Height) / 2, area.Top, Math.Max(area.Top, area.Bottom - Height)));
+        }
 
         Label question = new()
         {
@@ -123,9 +133,12 @@ internal sealed class HandoffQuestionDialog : Form
         args.SuppressKeyPress = true;
     }
 
-    public static HandoffRequest? Ask(IWin32Window owner, float dpiScale)
+    public static HandoffRequest? Ask(
+        IWin32Window owner,
+        float dpiScale,
+        AssistantWindowBounds? targetBounds = null)
     {
-        using HandoffQuestionDialog dialog = new(dpiScale);
+        using HandoffQuestionDialog dialog = new(dpiScale, targetBounds);
         if (dialog.ShowDialog(owner) != DialogResult.OK)
         {
             return null;
@@ -162,27 +175,13 @@ internal sealed class HandoffQuestionDialog : Form
     private void ValidateChoice() =>
         continueButton.Enabled = !custom.Checked || !string.IsNullOrWhiteSpace(customText.Text);
 
-    private void ConfigureOption(RadioButton option, Rectangle bounds, float scale)
+    private void ConfigureOption(HandoffOptionButton option, Rectangle bounds, float scale)
     {
-        option.Appearance = Appearance.Button;
-        option.AutoSize = false;
         option.Bounds = Scale(bounds, scale);
-        option.Padding = new Padding((int)(14 * scale), 0, (int)(14 * scale), 0);
-        option.TextAlign = ContentAlignment.MiddleLeft;
-        option.FlatStyle = FlatStyle.Flat;
-        option.FlatAppearance.BorderSize = Math.Max(1, (int)(2 * scale));
-        option.FlatAppearance.MouseOverBackColor = HoverColor;
-        option.FlatAppearance.MouseDownBackColor = HoverColor;
-        option.FlatAppearance.CheckedBackColor = HoverColor;
         UpdateOptionStyle(option);
     }
 
-    private void UpdateOptionStyle(RadioButton option)
-    {
-        option.BackColor = option.Checked ? HoverColor : PanelColor;
-        option.FlatAppearance.BorderColor = option.Checked ? HighlightColor : EdgeColor;
-        option.ForeColor = option.Checked ? HighlightColor : ForeColor;
-    }
+    private static void UpdateOptionStyle(RadioButton option) => option.Invalidate();
 
     private void ConfigureButton(Button button, Rectangle bounds, float scale)
     {
@@ -202,6 +201,96 @@ internal sealed class HandoffQuestionDialog : Form
 
     [DllImport("user32.dll")]
     private static extern bool SetForegroundWindow(nint window);
+
+    private sealed class HandoffOptionButton : RadioButton
+    {
+        private readonly string key;
+        private readonly string description;
+        private bool hovered;
+
+        internal HandoffOptionButton(string key, string description)
+        {
+            this.key = key;
+            this.description = description;
+            Text = $"{key}. {description}";
+            AccessibleName = Text;
+            Appearance = Appearance.Button;
+            AutoSize = false;
+            FlatStyle = FlatStyle.Flat;
+            FlatAppearance.BorderSize = 0;
+            SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint |
+                ControlStyles.OptimizedDoubleBuffer, true);
+        }
+
+        protected override void OnMouseEnter(EventArgs args)
+        {
+            base.OnMouseEnter(args);
+            hovered = true;
+            Invalidate();
+        }
+
+        protected override void OnMouseLeave(EventArgs args)
+        {
+            base.OnMouseLeave(args);
+            hovered = false;
+            Invalidate();
+        }
+
+        protected override void OnGotFocus(EventArgs args)
+        {
+            base.OnGotFocus(args);
+            Invalidate();
+        }
+
+        protected override void OnLostFocus(EventArgs args)
+        {
+            base.OnLostFocus(args);
+            Invalidate();
+        }
+
+        protected override void OnPaint(PaintEventArgs args)
+        {
+            float scale = DeviceDpi / 96f;
+            Rectangle bounds = ClientRectangle;
+            args.Graphics.Clear(Checked || hovered ? HoverColor : PanelColor);
+            using Pen edge = new(Checked ? HighlightColor : EdgeColor, Math.Max(1, 2 * scale));
+            args.Graphics.DrawRectangle(edge, 0, 0, bounds.Width - 1, bounds.Height - 1);
+
+            int keySize = (int)Math.Round(30 * scale);
+            Rectangle keyBounds = new(
+                (int)Math.Round(14 * scale),
+                (bounds.Height - keySize) / 2,
+                keySize,
+                keySize);
+            Rectangle keyShadow = keyBounds;
+            keyShadow.Offset((int)Math.Max(1, 2 * scale), (int)Math.Max(1, 2 * scale));
+            using SolidBrush shadow = new(Color.FromArgb(17, 16, 22));
+            args.Graphics.FillRectangle(shadow, keyShadow);
+            using SolidBrush keyBackground = new(Color.FromArgb(31, 29, 38));
+            args.Graphics.FillRectangle(keyBackground, keyBounds);
+            using Pen keyEdge = new(HighlightColor, Math.Max(1, 2 * scale));
+            args.Graphics.DrawRectangle(
+                keyEdge, keyBounds.X, keyBounds.Y, keyBounds.Width - 1, keyBounds.Height - 1);
+            TextRenderer.DrawText(args.Graphics, key, Font, keyBounds, HighlightColor,
+                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter |
+                TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine);
+
+            Rectangle descriptionBounds = new(
+                keyBounds.Right + (int)Math.Round(14 * scale),
+                0,
+                Math.Max(1, bounds.Width - keyBounds.Right - (int)Math.Round(28 * scale)),
+                bounds.Height);
+            TextRenderer.DrawText(args.Graphics, description, Font, descriptionBounds, ForeColor,
+                TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix |
+                TextFormatFlags.SingleLine | TextFormatFlags.EndEllipsis);
+
+            if (Focused && ShowFocusCues)
+            {
+                Rectangle focus = Rectangle.Inflate(bounds, -(int)Math.Round(5 * scale), -(int)Math.Round(5 * scale));
+                ControlPaint.DrawFocusRectangle(args.Graphics, focus, ForeColor, Color.Transparent);
+            }
+        }
+    }
 
     protected override void Dispose(bool disposing)
     {

@@ -10,12 +10,15 @@ internal sealed class PixelSkillMenu : Form
     private Font? headingFont;
     private Font? itemFont;
     private Font? shortcutFont;
+    private Rectangle summonBounds;
     private Rectangle inquireBounds;
     private Rectangle handoffBounds;
     private Rectangle storeBounds;
+    private bool summonHovered;
     private bool inquireHovered;
     private bool handoffHovered;
     private bool storeHovered;
+    private string summonShortcut = "Alt+Enter";
     private bool waitForMouseRelease;
     private MouseButtons previousButtons;
 
@@ -28,11 +31,12 @@ internal sealed class PixelSkillMenu : Form
         AutoScaleMode = AutoScaleMode.None;
         BackColor = Color.FromArgb(31, 29, 38);
         DoubleBuffered = true;
-        ClientSize = new Size(360, 302);
+        ClientSize = new Size(360, 378);
         AccessibleName = "Copilot Buddy special skills";
         dismissTimer.Tick += (_, _) => DismissOnOutsideClick();
     }
 
+    public event EventHandler? SummonRequested;
     public event EventHandler? InquireRequested;
     public event EventHandler? HandoffRequested;
     public event EventHandler? StoreRequested;
@@ -49,25 +53,29 @@ internal sealed class PixelSkillMenu : Form
         }
     }
 
-    public void Present(Form owner, Point location, float dpiScale)
+    public void Present(Form owner, Point location, float dpiScale, string shortcut)
     {
         float scale = Math.Max(1, dpiScale);
+        summonShortcut = shortcut;
         headingFont?.Dispose();
         itemFont?.Dispose();
         shortcutFont?.Dispose();
         headingFont = new Font(fonts.Families[0], 22 * scale, FontStyle.Regular, GraphicsUnit.Pixel);
         itemFont = new Font(fonts.Families[0], 30 * scale, FontStyle.Regular, GraphicsUnit.Pixel);
         shortcutFont = new Font(fonts.Families[0], 21 * scale, FontStyle.Regular, GraphicsUnit.Pixel);
-        ClientSize = new Size((int)Math.Round(360 * scale), (int)Math.Round(302 * scale));
+        ClientSize = new Size((int)Math.Round(360 * scale), (int)Math.Round(378 * scale));
         Location = location;
-        inquireBounds = new Rectangle((int)(12 * scale), (int)(61 * scale),
+        summonBounds = new Rectangle((int)(12 * scale), (int)(61 * scale),
             ClientSize.Width - (int)(24 * scale), (int)(74 * scale));
-        handoffBounds = new Rectangle((int)(12 * scale), (int)(137 * scale),
+        inquireBounds = new Rectangle((int)(12 * scale), (int)(137 * scale),
             ClientSize.Width - (int)(24 * scale), (int)(74 * scale));
-        storeBounds = new Rectangle((int)(12 * scale), (int)(213 * scale),
+        handoffBounds = new Rectangle((int)(12 * scale), (int)(213 * scale),
+            ClientSize.Width - (int)(24 * scale), (int)(74 * scale));
+        storeBounds = new Rectangle((int)(12 * scale), (int)(289 * scale),
             ClientSize.Width - (int)(24 * scale), (int)(74 * scale));
         waitForMouseRelease = true;
         previousButtons = MouseButtons.None;
+        summonHovered = false;
         inquireHovered = false;
         handoffHovered = false;
         storeHovered = false;
@@ -100,6 +108,7 @@ internal sealed class PixelSkillMenu : Form
         args.Graphics.DrawLine(divider, (int)(12 * scale), (int)(53 * scale),
             ClientSize.Width - (int)(13 * scale), (int)(53 * scale));
 
+        DrawItem(args.Graphics, summonBounds, summonHovered, "Summon", summonShortcut, scale);
         DrawItem(args.Graphics, inquireBounds, inquireHovered, "Inquire", "Alt+Shift+G", scale);
         DrawItem(args.Graphics, handoffBounds, handoffHovered, "Handoff", "Alt+Shift+H", scale);
         DrawItem(args.Graphics, storeBounds, storeHovered, "Store", "Alt+Shift+S", scale);
@@ -136,15 +145,18 @@ internal sealed class PixelSkillMenu : Form
     protected override void OnMouseMove(MouseEventArgs args)
     {
         base.OnMouseMove(args);
+        bool summon = summonBounds.Contains(args.Location);
         bool inquire = inquireBounds.Contains(args.Location);
         bool hovered = handoffBounds.Contains(args.Location);
         bool store = storeBounds.Contains(args.Location);
-        if (inquireHovered != inquire || handoffHovered != hovered || storeHovered != store)
+        if (summonHovered != summon || inquireHovered != inquire ||
+            handoffHovered != hovered || storeHovered != store)
         {
+            summonHovered = summon;
             inquireHovered = inquire;
             handoffHovered = hovered;
             storeHovered = store;
-            Cursor = inquire || hovered || store ? Cursors.Hand : Cursors.Default;
+            Cursor = summon || inquire || hovered || store ? Cursors.Hand : Cursors.Default;
             Invalidate();
         }
     }
@@ -152,8 +164,9 @@ internal sealed class PixelSkillMenu : Form
     protected override void OnMouseLeave(EventArgs args)
     {
         base.OnMouseLeave(args);
-        if (inquireHovered || handoffHovered || storeHovered)
+        if (summonHovered || inquireHovered || handoffHovered || storeHovered)
         {
+            summonHovered = false;
             inquireHovered = false;
             handoffHovered = false;
             storeHovered = false;
@@ -165,7 +178,12 @@ internal sealed class PixelSkillMenu : Form
     protected override void OnMouseDown(MouseEventArgs args)
     {
         base.OnMouseDown(args);
-        if (args.Button == MouseButtons.Left && inquireBounds.Contains(args.Location))
+        if (args.Button == MouseButtons.Left && summonBounds.Contains(args.Location))
+        {
+            Hide();
+            SummonRequested?.Invoke(this, EventArgs.Empty);
+        }
+        else if (args.Button == MouseButtons.Left && inquireBounds.Contains(args.Location))
         {
             Hide();
             InquireRequested?.Invoke(this, EventArgs.Empty);

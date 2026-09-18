@@ -9,7 +9,7 @@ internal sealed partial class ReplayWindow
     private readonly ContextPressure contextPressure = new();
     private ContainerVisual? contextSweat;
     private readonly List<CompositionObject> sweatResources = [];
-    private string? SessionMessage => contextPressure.Message ?? attentionQueue.Current?.Message;
+    private string? SessionMessage => focusWaitMessage ?? contextPressure.Message ?? attentionQueue.Current?.Message;
     private bool HasSessionAction => contextPressure.Presented is not null || attentionQueue.Current is not null;
 
     private void OnContextUsageChanged(object? sender, SessionContextUsage usage) =>

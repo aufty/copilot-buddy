@@ -122,7 +122,10 @@ internal sealed partial class ReplayWindow
         return new PresentationResponse(PipeProtocol.Version, true);
     }
 
-    private async void OnActionRequested(object? sender, EventArgs args)
+    private async void OnActionRequested(object? sender, EventArgs args) =>
+        await HandleActionRequestedAsync();
+
+    private async Task HandleActionRequestedAsync()
     {
         if (contextPressure.Presented is not null && await HandleContextActionAsync())
         {

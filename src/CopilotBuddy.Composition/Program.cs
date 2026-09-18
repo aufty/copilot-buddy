@@ -16,6 +16,7 @@ internal static class Program
     [STAThread]
     private static void Main()
     {
+        ApplicationConfiguration.Initialize();
         string[] arguments = Environment.GetCommandLineArgs();
         if (arguments.Contains("--assistant-broker", StringComparer.OrdinalIgnoreCase))
         {
@@ -27,7 +28,6 @@ internal static class Program
             CopilotBuddy.Copilot.CopilotSessionBrokerHost.RunAsync(cliPath).GetAwaiter().GetResult();
             return;
         }
-        ApplicationConfiguration.Initialize();
         Application.SetUnhandledExceptionMode(UnhandledExceptionMode.ThrowException);
         using Mutex instance = new(true, "Local\\CopilotBuddy.Composition.v1", out bool firstInstance);
         if (!firstInstance)
@@ -330,7 +330,7 @@ internal sealed partial class ReplayWindow : Form
 
     private void StartPassiveMotion()
     {
-        if (attentionBounce is not null || sessionLaunchJump is not null)
+        if (attentionBounce is not null || sessionLaunchJump is not null || handoffWindowJump is not null)
         {
             return;
         }
@@ -475,7 +475,7 @@ internal sealed partial class ReplayWindow : Form
         long now = Stopwatch.GetTimestamp();
         TimeSpan remaining = Stopwatch.GetElapsedTime(modelTimestamp, now);
         modelTimestamp = now;
-        if (dragging || releasingDrag || sessionLaunchJump is not null ||
+        if (dragging || releasingDrag || sessionLaunchJump is not null || handoffWindowJump is not null ||
             (attentionBounce is not null && controller!.Message is null))
         {
             return;
@@ -930,7 +930,7 @@ internal sealed partial class ReplayWindow : Form
         }
         if (message.Msg == 0x0312 && message.WParam == OpenSessionHotkeyId)
         {
-            _ = OpenSessionAsync(celebrate: true);
+            _ = SummonAsync();
             return;
         }
         if (message.Msg == 0x0312 && message.WParam == SkillMenuHotkeyId)
@@ -999,10 +999,14 @@ internal sealed partial class ReplayWindow : Form
         {
             return;
         }
-        if (dragging || releasingDrag || handoffPresent?.IsMoving == true)
+        if (dragging || releasingDrag || handoffPresent?.IsMoving == true ||
+            visitingHandoffWindow || handoffWindowJump is not null)
         {
             placementPending = true;
-            ReleaseDrag();
+            if (dragging || releasingDrag)
+            {
+                ReleaseDrag();
+            }
             return;
         }
         repositioning = true;

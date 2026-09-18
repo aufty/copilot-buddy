@@ -25,9 +25,17 @@ internal sealed partial class ReplayWindow
     private readonly List<CompositionObject> orbResources = [];
     private readonly List<CompositionObject> sparkleResources = [];
     private readonly System.Windows.Forms.Timer sparkleTimer = new() { Interval = 850 };
+    private readonly System.Windows.Forms.Timer focusWaitTimer = new() { Interval = 350 };
     private CompositionScopedBatch? sessionLaunchJump;
+    private CompositionScopedBatch? handoffWindowJump;
+    private bool visitingHandoffWindow;
+    private bool restoringTaskbarAfterHandoffJump;
+    private Rectangle handoffTaskbarBounds;
+    private double handoffTaskbarTargetX;
     private bool openingSession;
     private bool focusingSession;
+    private string? focusWaitMessage;
+    private int focusWaitFrame;
     private bool startingHandoff;
     private bool storingSession;
     private bool injectingInquire;
@@ -42,13 +50,14 @@ internal sealed partial class ReplayWindow
 
     private void AddSessionMenu()
     {
+        skillMenu.SummonRequested += async (_, _) => await SummonAsync();
         skillMenu.InquireRequested += async (_, _) => await InjectInquireAsync();
         skillMenu.HandoffRequested += async (_, _) => await StartHandoffAsync();
         skillMenu.StoreRequested += async (_, _) => await StoreSessionAsync();
         skillMenu.VisibleChanged += (_, _) => UpdatePointerRouting();
 
-        exitMenu.Items.Add("Open Copilot CLI", null, async (_, _) => await OpenSessionAsync());
-        shortcutMenu = new ToolStripMenuItem($"Shortcut: {sessionSettings.Shortcut}", null, (_, _) => EditShortcut());
+        exitMenu.Items.Add("Summon", null, async (_, _) => await SummonAsync());
+        shortcutMenu = new ToolStripMenuItem($"Summon shortcut: {sessionSettings.Shortcut}", null, (_, _) => EditShortcut());
         exitMenu.Items.Add(shortcutMenu);
         exitMenu.Items.Add(new ToolStripSeparator());
     }
@@ -63,6 +72,12 @@ internal sealed partial class ReplayWindow
         follow.SetReferenceParameter("buddy", sprite!);
         sessionEffects.StartAnimation(nameof(sessionEffects.Offset), follow);
         sparkleTimer.Tick += (_, _) => ClearSparkle();
+        focusWaitTimer.Tick += (_, _) =>
+        {
+            focusWaitFrame = (focusWaitFrame + 1) % 3;
+            focusWaitMessage = new string('.', focusWaitFrame + 1);
+            RefreshAttention();
+        };
         assistantSessions.AttentionRequested += OnSessionAttention;
         assistantSessions.ContextUsageChanged += OnContextUsageChanged;
         assistantSessions.HandoffCompleted += OnHandoffCompleted;
@@ -140,7 +155,7 @@ internal sealed partial class ReplayWindow
         Point buddyTopRight = PointToScreen(new Point(
             (int)Math.Round((snapshot.X + spriteWidth) * dpiScale),
             (int)Math.Round((baseline - snapshot.HopOffset) * dpiScale)));
-        Size menuSize = new((int)Math.Round(360 * dpiScale), (int)Math.Round(302 * dpiScale));
+        Size menuSize = new((int)Math.Round(360 * dpiScale), (int)Math.Round(378 * dpiScale));
         Rectangle area = Screen.FromPoint(buddyTopRight).WorkingArea;
         int x = buddyTopRight.X + (int)(8 * dpiScale);
         if (x + menuSize.Width > area.Right)
@@ -150,7 +165,8 @@ internal sealed partial class ReplayWindow
         int y = Math.Clamp(buddyTopRight.Y - menuSize.Height, area.Top, Math.Max(area.Top, area.Bottom - menuSize.Height));
         skillMenu.Present(this,
             new Point(Math.Clamp(x, area.Left, Math.Max(area.Left, area.Right - menuSize.Width)), y),
-            dpiScale);
+            dpiScale,
+            sessionSettings.Shortcut);
     }
 
     private async Task InjectInquireAsync()
@@ -240,14 +256,27 @@ internal sealed partial class ReplayWindow
             ShowSessionError("Focus a Copilot CLI session opened by the buddy before starting Handoff.");
             return;
         }
-        HandoffRequest? request = HandoffQuestionDialog.Ask(this, dpiScale);
-        if (request is null)
-        {
-            return;
-        }
         startingHandoff = true;
         try
         {
+            if (target.WindowBounds is { Width: > 0, Height: > 0 } windowBounds)
+            {
+                BeginHandoffWindowVisit(windowBounds);
+            }
+            HandoffRequest? request;
+            try
+            {
+                request = HandoffQuestionDialog.Ask(this, dpiScale, target.WindowBounds);
+            }
+            finally
+            {
+                EndHandoffWindowVisit();
+            }
+            if (request is null)
+            {
+                return;
+            }
+
             using CancellationTokenSource timeout = CancellationTokenSource.CreateLinkedTokenSource(sessionCancellation.Token);
             timeout.CancelAfter(TimeSpan.FromSeconds(10));
             AssistantHandoff? handoff = await assistantSessions.StartHandoffAsync(target, request, timeout.Token);
@@ -400,6 +429,17 @@ internal sealed partial class ReplayWindow
         }
     }
 
+    private async Task SummonAsync()
+    {
+        skillMenu.Hide();
+        if (HasSessionAction)
+        {
+            await HandleActionRequestedAsync();
+            return;
+        }
+        await OpenSessionAsync(celebrate: true);
+    }
+
     private void StartSessionLaunchJump()
     {
         if (controller is null || sprite is null || !controller.IsVisible || dragging || releasingDrag ||
@@ -467,6 +507,218 @@ internal sealed partial class ReplayWindow
         batch?.Dispose();
     }
 
+    private void BeginHandoffWindowVisit(AssistantWindowBounds windowBounds)
+    {
+        if (!TaskbarMode || controller is null || sprite is null || compositor is null ||
+            dragging || releasingDrag || visitingHandoffWindow)
+        {
+            return;
+        }
+
+        AdvanceModel();
+        StopAttentionBounce();
+        StopSessionLaunchJump();
+        StopHandoffWindowJump();
+        passiveTimer.Stop();
+        sprite.StopAnimation(nameof(sprite.Offset));
+        sprite.StopAnimation(nameof(sprite.Scale));
+        sprite.Scale = Vector3.One;
+        Vector3 start = PositionOf(controller.Snapshot);
+        Point startScreen = PointToScreen(new Point((int)Math.Round(start.X), (int)Math.Round(start.Y)));
+
+        Rectangle virtualScreen = SystemInformation.VirtualScreen;
+        Rectangle target = Rectangle.Intersect(
+            new Rectangle(windowBounds.Left, windowBounds.Top, windowBounds.Width, windowBounds.Height),
+            virtualScreen);
+        if (target.Width <= 0 || target.Height <= 0)
+        {
+            StartPassiveMotion();
+            return;
+        }
+
+        visitingHandoffWindow = true;
+        restoringTaskbarAfterHandoffJump = false;
+        repositioning = true;
+        try
+        {
+            Bounds = virtualScreen;
+        }
+        finally
+        {
+            repositioning = false;
+        }
+
+        double spriteWidthPixels = spriteWidth * dpiScale;
+        double spriteHeightPixels = spriteHeight * dpiScale;
+        double minimumX = Math.Clamp((target.Left - virtualScreen.Left) / dpiScale,
+            0, Math.Max(0, ClientSize.Width / dpiScale - spriteWidth));
+        double maximumX = Math.Clamp((target.Right - virtualScreen.Left - spriteWidthPixels) / dpiScale,
+            minimumX, Math.Max(minimumX, ClientSize.Width / dpiScale - spriteWidth));
+        double targetX = minimumX + (maximumX - minimumX) / 2;
+        baseline = Math.Clamp((target.Bottom - virtualScreen.Top - spriteHeightPixels) / dpiScale,
+            0, Math.Max(0, ClientSize.Height / dpiScale - spriteHeight));
+        controller.SetMaximumLift(Math.Max(0, baseline));
+        controller.SetHorizontalBounds(targetX, targetX);
+        controller.ResetWandering();
+        controller.SetHorizontalBounds(minimumX, maximumX);
+
+        Vector3 localStart = new(startScreen.X - virtualScreen.Left, startScreen.Y - virtualScreen.Top, 0);
+        Vector3 destination = PositionOf(controller.Snapshot with { HopOffset = 0 });
+        StartHandoffWindowJump(localStart, destination);
+    }
+
+    private void EndHandoffWindowVisit()
+    {
+        if (!visitingHandoffWindow || controller is null || sprite is null || compositor is null)
+        {
+            return;
+        }
+
+        StopHandoffWindowJump();
+        Vector3 current = CurrentSpriteOffset();
+        sprite.StopAnimation(nameof(sprite.Offset));
+        sprite.StopAnimation(nameof(sprite.Scale));
+        sprite.Scale = Vector3.One;
+        Point currentScreen = PointToScreen(new Point((int)Math.Round(current.X), (int)Math.Round(current.Y)));
+        handoffTaskbarBounds = TaskbarPlacement.GetPrimaryOverlayBounds();
+        double maximumX = Math.Max(0, handoffTaskbarBounds.Width / dpiScale - spriteWidth);
+        handoffTaskbarTargetX = Math.Clamp(
+            (currentScreen.X - handoffTaskbarBounds.Left) / dpiScale, 0, maximumX);
+        Rectangle virtualScreen = SystemInformation.VirtualScreen;
+        Vector3 localStart = new(currentScreen.X - virtualScreen.Left, currentScreen.Y - virtualScreen.Top, 0);
+        Vector3 destination = new(
+            (float)(handoffTaskbarBounds.Left - virtualScreen.Left + handoffTaskbarTargetX * dpiScale),
+            (float)(handoffTaskbarBounds.Bottom - virtualScreen.Top - spriteHeight * dpiScale),
+            0);
+        restoringTaskbarAfterHandoffJump = true;
+        StartHandoffWindowJump(localStart, destination);
+    }
+
+    private void StartHandoffWindowJump(Vector3 start, Vector3 destination)
+    {
+        sprite!.Offset = start;
+        sprite.Scale = Vector3.One;
+        ShowFrame(SpriteFrame.Standing);
+        float distance = Vector2.Distance(new Vector2(start.X, start.Y), new Vector2(destination.X, destination.Y));
+        float arc = presentation.Attention.ReducedMotion
+            ? 0
+            : Math.Clamp(distance * 0.22f, 56 * dpiScale, 160 * dpiScale);
+        using Vector3KeyFrameAnimation jump = compositor!.CreateVector3KeyFrameAnimation();
+        using Vector3KeyFrameAnimation deformation = compositor.CreateVector3KeyFrameAnimation();
+        using CubicBezierEasingFunction takeoff = compositor.CreateCubicBezierEasingFunction(
+            new Vector2(0.2f, 0.8f), new Vector2(0.3f, 1));
+        using CubicBezierEasingFunction landing = compositor.CreateCubicBezierEasingFunction(
+            new Vector2(0.6f, 0), new Vector2(0.8f, 0.2f));
+        using LinearEasingFunction linear = compositor.CreateLinearEasingFunction();
+        jump.Duration = deformation.Duration =
+            TimeSpan.FromMilliseconds(presentation.Attention.ReducedMotion ? 250 : 950);
+        jump.InsertKeyFrame(0, start);
+        if (presentation.Attention.ReducedMotion)
+        {
+            jump.InsertKeyFrame(1, destination);
+            deformation.InsertKeyFrame(0, Vector3.One);
+            deformation.InsertKeyFrame(1, Vector3.One);
+        }
+        else
+        {
+            const float takeoffProgress = 0.16f;
+            const float landingProgress = 0.86f;
+            const int flightSamples = 60;
+            jump.InsertKeyFrame(takeoffProgress, start);
+            float peakY = Math.Min(start.Y, destination.Y) - arc;
+            Vector3 firstControl = new(destination.X, peakY, 0);
+            Vector3 secondControl = new(destination.X, peakY, 0);
+            for (int sample = 1; sample <= flightSamples; sample++)
+            {
+                float flight = (float)sample / flightSamples;
+                float progress = takeoffProgress + (landingProgress - takeoffProgress) * flight;
+                float inverse = 1 - flight;
+                Vector3 position =
+                    inverse * inverse * inverse * start +
+                    3 * inverse * inverse * flight * firstControl +
+                    3 * inverse * flight * flight * secondControl +
+                    flight * flight * flight * destination;
+                jump.InsertKeyFrame(progress, position, linear);
+            }
+            jump.InsertKeyFrame(1, destination);
+
+            deformation.InsertKeyFrame(0, Vector3.One);
+            deformation.InsertKeyFrame(0.1f, new Vector3(1.18f, 0.72f, 1), takeoff);
+            deformation.InsertKeyFrame(takeoffProgress, new Vector3(0.9f, 1.12f, 1), takeoff);
+            deformation.InsertKeyFrame(0.72f, new Vector3(0.96f, 1.05f, 1));
+            deformation.InsertKeyFrame(landingProgress, new Vector3(1.2f, 0.7f, 1), landing);
+            deformation.InsertKeyFrame(1, Vector3.One, takeoff);
+        }
+
+        CompositionScopedBatch batch = compositor.CreateScopedBatch(CompositionBatchTypes.Animation);
+        handoffWindowJump = batch;
+        batch.Completed += (_, _) =>
+        {
+            if (!Disposing && !IsDisposed && IsHandleCreated)
+            {
+                BeginInvoke(() => CompleteHandoffWindowJump(batch));
+            }
+        };
+        sprite.StartAnimation(nameof(sprite.Offset), jump);
+        sprite.StartAnimation(nameof(sprite.Scale), deformation);
+        batch.End();
+    }
+
+    private void CompleteHandoffWindowJump(CompositionScopedBatch batch)
+    {
+        if (!ReferenceEquals(handoffWindowJump, batch))
+        {
+            return;
+        }
+
+        handoffWindowJump = null;
+        batch.Dispose();
+        modelTimestamp = System.Diagnostics.Stopwatch.GetTimestamp();
+        if (restoringTaskbarAfterHandoffJump)
+        {
+            restoringTaskbarAfterHandoffJump = false;
+            repositioning = true;
+            try
+            {
+                Bounds = handoffTaskbarBounds;
+                baseline = ClientSize.Height / dpiScale - spriteHeight;
+                taskbarLayer?.Reattach();
+            }
+            finally
+            {
+                repositioning = false;
+            }
+            double maximumX = Math.Max(0, ClientSize.Width / dpiScale - spriteWidth);
+            controller!.SetMaximumLift(Math.Max(0, baseline));
+            controller.SetHorizontalBounds(handoffTaskbarTargetX, handoffTaskbarTargetX);
+            controller.ResetWandering();
+            controller.SetHorizontalBounds(0, maximumX);
+            visitingHandoffWindow = false;
+        }
+        sprite!.Offset = PositionOf(controller!.Snapshot);
+        sprite.Scale = Vector3.One;
+        StartPassiveMotion();
+        UpdateBubble();
+        if (placementPending && !visitingHandoffWindow)
+        {
+            placementPending = false;
+            QueuePlacementRefresh();
+        }
+    }
+
+    private void StopHandoffWindowJump()
+    {
+        CompositionScopedBatch? batch = handoffWindowJump;
+        handoffWindowJump = null;
+        batch?.Dispose();
+    }
+
+    private Vector3 CurrentSpriteOffset() =>
+        sprite!.Properties.TryGetVector3(nameof(sprite.Offset), out Vector3 offset) ==
+            CompositionGetValueStatus.Succeeded
+            ? offset
+            : sprite.Offset;
+
     private async Task FocusNextSessionAsync()
     {
         if (attentionQueue.Current is not { } attention)
@@ -487,28 +739,44 @@ internal sealed partial class ReplayWindow
             return;
         }
         focusingSession = true;
+        focusWaitFrame = 0;
+        focusWaitMessage = ".";
+        focusWaitTimer.Start();
+        RefreshAttention();
         try
         {
             using CancellationTokenSource timeout = CancellationTokenSource.CreateLinkedTokenSource(sessionCancellation.Token);
             timeout.CancelAfter(TimeSpan.FromSeconds(5));
-            if (await assistantSessions.FocusAsync(sessionId, timeout.Token))
+            while (!timeout.IsCancellationRequested)
             {
-                if (sessionsStopping) return;
-                acknowledge();
+                if (await assistantSessions.FocusAsync(sessionId, timeout.Token))
+                {
+                    if (sessionsStopping) return;
+                    acknowledge();
+                    return;
+                }
+                await Task.Delay(250, timeout.Token);
             }
-            else
-            {
-                ShowSessionError("Could not focus that CLI window. The alert remains queued.");
-            }
+            ShowSessionError("Could not focus that CLI window. The alert remains queued.");
         }
         catch (OperationCanceledException) when (sessionCancellation.IsCancellationRequested) { }
+        catch (OperationCanceledException)
+        {
+            ShowSessionError("Could not focus that CLI window. The alert remains queued.");
+        }
         catch (Exception exception)
         {
             ShowSessionError($"Could not focus the session: {exception.Message}");
         }
         finally
         {
+            focusWaitTimer.Stop();
+            focusWaitMessage = null;
             focusingSession = false;
+            if (!sessionsStopping)
+            {
+                RefreshAttention();
+            }
         }
     }
 
@@ -559,7 +827,7 @@ internal sealed partial class ReplayWindow
     {
         using Form dialog = new()
         {
-            Text = "Open CLI shortcut", FormBorderStyle = FormBorderStyle.FixedDialog,
+            Text = "Summon shortcut", FormBorderStyle = FormBorderStyle.FixedDialog,
             StartPosition = FormStartPosition.CenterScreen, ClientSize = new Size(330, 115),
             MinimizeBox = false, MaximizeBox = false, ShowInTaskbar = false
         };
@@ -581,7 +849,7 @@ internal sealed partial class ReplayWindow
                 RegisterShortcut(input.Text);
                 sessionSettings.Shortcut = input.Text;
                 sessionSettings.Save();
-                shortcutMenu!.Text = $"Shortcut: {input.Text}";
+                shortcutMenu!.Text = $"Summon shortcut: {input.Text}";
                 dialog.Close();
             }
             catch (Exception exception) when (exception is ArgumentException or Win32Exception or IOException or UnauthorizedAccessException)
@@ -739,6 +1007,7 @@ internal sealed partial class ReplayWindow
         _ = DisposeSessionsAsync();
         ClearSparkle();
         sparkleTimer.Dispose();
+        focusWaitTimer.Dispose();
         ClearContextSweat();
         foreach (CompositionObject resource in orbResources) resource.Dispose();
         skillMenu.Dispose();

@@ -444,7 +444,7 @@ public sealed class CopilotSessions(string? executablePath = null) : IAssistantS
             ?? throw new InvalidOperationException("The selected Copilot session is no longer attached.");
         await session.SendAsync(prompt, cancellationToken);
         nint window = FindTerminalWindow(terminal);
-        AssistantWindowBounds? bounds = window != 0 && GetWindowRect(window, out NativeRect rectangle)
+        AssistantWindowBounds? bounds = window != 0 && TryGetVisibleWindowBounds(window, out NativeRect rectangle)
             ? new(rectangle.Left, rectangle.Top, rectangle.Right - rectangle.Left, rectangle.Bottom - rectangle.Top)
             : null;
         return new(targetKey!, bounds);
@@ -492,8 +492,23 @@ public sealed class CopilotSessions(string? executablePath = null) : IAssistantS
         {
             return false;
         }
-        target = new(targetKey);
+        nint window = FindTerminalWindow(terminal);
+        AssistantWindowBounds? bounds = window != 0 && TryGetVisibleWindowBounds(window, out NativeRect rectangle)
+            ? new(rectangle.Left, rectangle.Top, rectangle.Right - rectangle.Left, rectangle.Bottom - rectangle.Top)
+            : null;
+        target = new(targetKey, bounds);
         return true;
+    }
+
+    private static bool TryGetVisibleWindowBounds(nint window, out NativeRect rectangle)
+    {
+        const uint extendedFrameBounds = 9;
+        return DwmGetWindowAttribute(
+                window,
+                extendedFrameBounds,
+                out rectangle,
+                (uint)Marshal.SizeOf<NativeRect>()) == 0 ||
+            GetWindowRect(window, out rectangle);
     }
 
     public async Task<AssistantHandoff?> StartHandoffAsync(
@@ -836,5 +851,7 @@ public sealed class CopilotSessions(string? executablePath = null) : IAssistantS
     [DllImport("user32.dll")] private static extern bool SetForegroundWindow(nint window);
     [DllImport("user32.dll")] private static extern nint GetForegroundWindow();
     [DllImport("user32.dll")] private static extern bool GetWindowRect(nint window, out NativeRect rectangle);
+    [DllImport("dwmapi.dll")] private static extern int DwmGetWindowAttribute(
+        nint window, uint attribute, out NativeRect value, uint valueSize);
     [DllImport("user32.dll", SetLastError = true)] private static extern bool PostMessage(nint window, uint message, nint wParam, nint lParam);
 }

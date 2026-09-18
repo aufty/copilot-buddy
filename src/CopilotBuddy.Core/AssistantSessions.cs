@@ -34,7 +34,9 @@ public sealed record AssistantHandoff(
     string ArtifactPath,
     string WorkingDirectory);
 
-public sealed record AssistantSessionTarget(string SessionId);
+public sealed record AssistantSessionTarget(
+    string SessionId,
+    AssistantWindowBounds? WindowBounds = null);
 
 public sealed record AssistantWindowBounds(int Left, int Top, int Width, int Height);
 
