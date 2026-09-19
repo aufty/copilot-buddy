@@ -67,6 +67,11 @@ internal static class BuddyCli
 			request = new(PipeProtocol.Version, PipeProtocol.Visible, Visible: value == "on");
 			return true;
 		}
+		if (args is ["quip"])
+		{
+			request = new(PipeProtocol.Version, PipeProtocol.Quip);
+			return true;
+		}
 		error = "Invalid command.";
 		return false;
 	}
@@ -77,5 +82,6 @@ internal static class BuddyCli
 		Console.Error.WriteLine("  copilot-buddyctl show \"Build needs your approval\"");
 		Console.Error.WriteLine("  copilot-buddyctl dismiss");
 		Console.Error.WriteLine("  copilot-buddyctl visible on|off");
+		Console.Error.WriteLine("  copilot-buddyctl quip");
 	}
 }

@@ -50,7 +50,6 @@ internal sealed partial class ReplayWindow
     private readonly HashSet<int> registeredHotkeys = [];
     private SparkleBorderWindow? sparkleBorder;
     private bool sessionsStopping;
-    private ToolStripMenuItem? shortcutMenu;
     private bool SkillsBlocked => gatheringWindows;
 
     private void AddSessionMenu()
@@ -64,10 +63,7 @@ internal sealed partial class ReplayWindow
         skillMenu.SupplyRequested += (_, args) => SelectSupply(args.Kind);
         skillMenu.VisibleChanged += (_, _) => UpdatePointerRouting();
 
-        exitMenu.Items.Add("Summon", null, async (_, _) => await SummonAsync());
-        shortcutMenu = new ToolStripMenuItem("Settings...", null, async (_, _) => await EditSettingsAsync());
-        exitMenu.Items.Add(shortcutMenu);
-        exitMenu.Items.Add(new ToolStripSeparator());
+        exitMenu.Items.Add("Settings", null, async (_, _) => await EditSettingsAsync());
     }
 
     private void StartSessionIntegration()
@@ -160,6 +156,7 @@ internal sealed partial class ReplayWindow
         {
             return;
         }
+        SnoozeNeedMessage(requirePresented: false);
         AdvanceModel();
         PresentationSnapshot snapshot = controller.Snapshot;
         Point buddyTopRight = PointToScreen(new Point(
@@ -559,7 +556,15 @@ internal sealed partial class ReplayWindow
             UpdateSupplyAlertPause(true);
         }
         string? message = SessionMessage;
-        if (controller!.Message != message)
+        if (message is not null)
+        {
+            DismissAmbientQuip();
+        }
+        if (ambientQuip is not null && string.Equals(controller!.Message, ambientQuip, StringComparison.Ordinal))
+        {
+            UpdateBubble();
+        }
+        else if (controller!.Message != message)
         {
             ChangePresentation(() =>
             {
@@ -615,9 +620,27 @@ internal sealed partial class ReplayWindow
             return;
         }
         skillMenu.Hide();
-        if (HasSessionAction)
+        if (SnoozeNeedMessage(requirePresented: true))
         {
-            await HandleActionRequestedAsync();
+            return;
+        }
+        if (controller?.Message is not null)
+        {
+            if (HasSessionAction)
+            {
+                await HandleActionRequestedAsync();
+            }
+            else
+            {
+                AdvanceModel();
+                controller.DismissMessage();
+                UpdateBubble();
+                if (buddyActive && !dragging && !releasingDrag &&
+                    controller.Snapshot.State != VisualState.Landing)
+                {
+                    StartPassiveMotion();
+                }
+            }
             return;
         }
         await OpenSessionAsync(celebrate: true);
@@ -1100,6 +1123,9 @@ internal sealed partial class ReplayWindow
         skillMenu.Hide();
         AssistantLaunchCommand previousLaunch = sessionSettings.EffectiveCopilotLaunch;
         string previousBuddy = BuddySpriteCatalog.Resolve(sessionSettings.Buddy).Name;
+        int previousDisplayScalePercent = sessionSettings.EffectiveDisplayScalePercent;
+        bool previousCareSystemEnabled = sessionSettings.CareSystemEnabled;
+        bool previousAmbientQuipsEnabled = sessionSettings.AmbientQuipsEnabled;
         SessionShortcutSettings previousShortcuts = sessionSettings.Shortcuts;
         SettingsDialogResult? updated;
         UnregisterShortcuts();
@@ -1107,9 +1133,12 @@ internal sealed partial class ReplayWindow
         {
             updated = CopilotSettingsDialog.Edit(
                 this,
-                dpiScale,
+                DeviceDpi / 96f,
                 previousLaunch,
                 previousBuddy,
+                previousDisplayScalePercent,
+                previousCareSystemEnabled,
+                previousAmbientQuipsEnabled,
                 previousShortcuts,
                 shortcuts =>
                 {
@@ -1160,13 +1189,30 @@ internal sealed partial class ReplayWindow
             sessionSettings.CopilotLaunch = updated.CopilotLaunch;
             sessionSettings.CliPath = null;
             sessionSettings.Buddy = updated.Buddy;
+            sessionSettings.DisplayScalePercent = updated.DisplayScalePercent;
+            sessionSettings.CareSystemEnabled = updated.CareSystemEnabled;
+            sessionSettings.AmbientQuipsEnabled = updated.AmbientQuipsEnabled;
             sessionSettings.Shortcuts = updated.Shortcuts;
             sessionSettings.Save();
-            if (!string.Equals(updated.Buddy, previousBuddy, StringComparison.OrdinalIgnoreCase))
+            bool displayScaleChanged = updated.DisplayScalePercent != previousDisplayScalePercent;
+            if (displayScaleChanged)
+            {
+                RefreshPlacement();
+                UpdateBubble();
+            }
+            else if (!string.Equals(updated.Buddy, previousBuddy, StringComparison.OrdinalIgnoreCase))
             {
                 LoadSpriteFrames();
                 ShowFrame(controller!.Snapshot.Frame);
                 UpdateContextSweat();
+            }
+            if (updated.CareSystemEnabled != previousCareSystemEnabled)
+            {
+                SetCareSystemEnabled(updated.CareSystemEnabled);
+            }
+            if (updated.AmbientQuipsEnabled != previousAmbientQuipsEnabled)
+            {
+                SetAmbientQuipsEnabled(updated.AmbientQuipsEnabled);
             }
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or
@@ -1186,6 +1232,9 @@ internal sealed partial class ReplayWindow
             }
             sessionSettings.CopilotLaunch = previousLaunch;
             sessionSettings.Buddy = previousBuddy;
+            sessionSettings.DisplayScalePercent = previousDisplayScalePercent;
+            sessionSettings.CareSystemEnabled = previousCareSystemEnabled;
+            sessionSettings.AmbientQuipsEnabled = previousAmbientQuipsEnabled;
             sessionSettings.Shortcuts = previousShortcuts;
             try
             {
@@ -1373,6 +1422,9 @@ internal sealed class SessionSettings
     public string GatherShortcut { get; set; } = "Alt+Shift+T";
     public string StoreShortcut { get; set; } = "Alt+Shift+S";
     public string Buddy { get; set; } = BuddySpriteCatalog.DefaultName;
+    public int DisplayScalePercent { get; set; } = 100;
+    public bool CareSystemEnabled { get; set; } = true;
+    public bool AmbientQuipsEnabled { get; set; } = true;
     public string? WorkingDirectory { get; set; }
     public AssistantLaunchCommand? CopilotLaunch { get; set; }
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
@@ -1383,6 +1435,12 @@ internal sealed class SessionSettings
         (!string.IsNullOrWhiteSpace(CliPath)
             ? new AssistantLaunchCommand(CliPath, [])
             : AssistantLaunchCommand.Default);
+    [JsonIgnore]
+    public int EffectiveDisplayScalePercent => DisplayScalePercent is 150 or 200
+        ? DisplayScalePercent
+        : 100;
+    [JsonIgnore]
+    public float EffectiveDisplayScale => EffectiveDisplayScalePercent / 100f;
     [JsonIgnore]
     public SessionShortcutSettings Shortcuts
     {

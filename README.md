@@ -33,9 +33,11 @@ dotnet run --project src/CopilotBuddy.Cli -- show "Build needs your approval"
 dotnet run --project src/CopilotBuddy.Cli -- dismiss
 dotnet run --project src/CopilotBuddy.Cli -- visible off
 dotnet run --project src/CopilotBuddy.Cli -- visible on
+
+dotnet run --project src/CopilotBuddy.Cli -- quip
 ```
 
-The built CLI is named `copilot-buddyctl.exe`. Messages pause wandering and display a bounded, wrapped speech bubble while the buddy waves and hops. Long messages are truncated with an ellipsis. Reduced-motion mode disables hops and uses slower waving. Commands received while dragging or flying update the bubble immediately; attention animation resumes after landing.
+The built CLI is named `copilot-buddyctl.exe`. Messages pause wandering and display a bounded, wrapped speech bubble while the buddy waves and hops. Long messages are truncated with an ellipsis. Reduced-motion mode disables hops and uses slower waving. Commands received while dragging or flying update the bubble immediately; attention animation resumes after landing. The `quip` command immediately requests one of Buddy's brief ambient remarks and restarts its normal randomized schedule.
 
 ## Releases
 
@@ -146,6 +148,7 @@ Settings, including the selected buddy sprite, are saved to `%LOCALAPPDATA%\Copi
 	"gatherShortcut": "Alt+Shift+T",
 	"storeShortcut": "Alt+Shift+S",
 	"buddy": "sprout",
+	"displayScalePercent": 100,
 	"workingDirectory": "C:\\source\\copilot-buddy",
 	"copilotLaunch": {
 		"executable": "custom-launcher",
@@ -154,7 +157,7 @@ Settings, including the selected buddy sprite, are saved to `%LOCALAPPDATA%\Copi
 }
 ```
 
-Open the Buddy Menu and select the gear at its top-right edge to choose a buddy, edit every global shortcut, and edit the Copilot launch command. The friendly command line is stored as a structured executable and prefix-argument array; Copilot Buddy appends its required UI-server, port, and session arguments. For example, `custom-launcher copilot --custom-option` produces the configuration above. Use `copilot` for the normal launch behavior. `workingDirectory: null` uses the directory the buddy was started from. For a normal launch, the adapter checks `COPILOT_CLI_PATH`, PATH, and the per-user WinGet installation. The legacy `cliPath` setting remains readable and is migrated when launch settings are saved. No GitHub credentials are stored in these settings. SDK connections use loopback and a random per-window connection token passed through the child environment.
+Open the Buddy Menu and select the gear at its top-right edge to choose a buddy, set the display scale to the default size, 150%, or 200%, edit every global shortcut, and edit the Copilot launch command. Display scale multiplies the existing DPI-aware sprite, text, menu, and effect sizes; missing or unsupported values use the default 100% scale. The friendly command line is stored as a structured executable and prefix-argument array; Copilot Buddy appends its required UI-server, port, and session arguments. For example, `custom-launcher copilot --custom-option` produces the configuration above. Use `copilot` for the normal launch behavior. `workingDirectory: null` uses the directory the buddy was started from. For a normal launch, the adapter checks `COPILOT_CLI_PATH`, PATH, and the per-user WinGet installation. The legacy `cliPath` setting remains readable and is migrated when launch settings are saved. No GitHub credentials are stored in these settings. SDK connections use loopback and a random per-window connection token passed through the child environment.
 
 This version observes only CLI windows launched by the buddy, including sessions created/switched inside those windows. It does not attach to arbitrary existing terminals. Exiting the visual Copilot Buddy unregisters its shortcuts and leaves both the broker and CLI windows running, allowing the next visual process to reconnect and recover pending alerts and current context state. If attachment fails, check the CLI's first-run prompts, close that window, and reopen it through the buddy. Hidden buddies retain pending alerts, which appear when made visible again. Replay/smoke modes do not register the shortcut or launch Copilot.
 

@@ -44,6 +44,18 @@ public sealed class BuddyNeedsTests
         Assert.True(needs.Relationship < relationship);
     }
 
+    [Fact]
+    public void SatisfyingAllRestoresEveryNeedAndClearsTheRequest()
+    {
+        BuddyNeedsController needs = CreateNeeds(new SequenceRandomSource(0, 0, 0, 0, 0, 0));
+        needs.Tick(TimeSpan.FromSeconds(8));
+
+        needs.SatisfyAll();
+
+        Assert.All(Enum.GetValues<BuddyNeed>(), need => Assert.Equal(1, needs.Level(need)));
+        Assert.Null(needs.CurrentRequest);
+    }
+
     private static BuddyNeedsController CreateNeeds(IRandomSource random) => new(
         new BuddyNeedsOptions
         {

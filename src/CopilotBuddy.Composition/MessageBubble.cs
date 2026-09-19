@@ -12,6 +12,7 @@ internal sealed class MessageBubble : Form
     private readonly PrivateFontCollection fonts = new();
     private bool fontRegistered;
     private string? message;
+    private MessageBubbleStyle style;
     private float scale;
     private Font? messageFont;
     private int padding;
@@ -54,22 +55,37 @@ internal sealed class MessageBubble : Form
         }
     }
 
-    public void Present(Form owner, string text, Point anchor, Rectangle area, float dpiScale)
+    public void Present(
+        Form owner,
+        string text,
+        Point anchor,
+        Rectangle area,
+        float dpiScale,
+        MessageBubbleStyle nextStyle = MessageBubbleStyle.Default)
     {
-        int maximumWidth = Math.Max(1, Math.Min(area.Width, (int)(options.MaximumWidth * dpiScale)));
-        int maximumHeight = Math.Max(1, Math.Min(area.Height, (int)(options.MaximumHeight * dpiScale)));
-        if (message != text || scale != dpiScale || Width > maximumWidth || Height > maximumHeight)
+        bool ambient = nextStyle == MessageBubbleStyle.Ambient;
+        int maximumWidth = Math.Max(1, Math.Min(area.Width,
+            (int)(options.MaximumWidth * dpiScale * (ambient ? 0.78 : 1))));
+        int maximumHeight = Math.Max(1, Math.Min(area.Height,
+            (int)(options.MaximumHeight * dpiScale * (ambient ? 0.7 : 1))));
+        if (message != text || style != nextStyle || scale != dpiScale ||
+            Width > maximumWidth || Height > maximumHeight)
         {
             message = text;
+            style = nextStyle;
             scale = dpiScale;
             messageFont?.Dispose();
-            messageFont = new Font(fonts.Families[0], 20 * scale, FontStyle.Regular, GraphicsUnit.Pixel);
-            padding = Math.Min((int)(options.Padding * scale), Math.Max(0, (Math.Min(maximumWidth, maximumHeight) - 1) / 2));
-            pointerHeight = Math.Min((int)(10 * scale), Math.Max(0, maximumHeight - padding * 2 - 1));
+            messageFont = new Font(fonts.Families[0], (ambient ? 17 : 20) * scale,
+                FontStyle.Regular, GraphicsUnit.Pixel);
+            double desiredPadding = ambient ? 9 : options.Padding;
+            padding = Math.Min((int)(desiredPadding * scale),
+                Math.Max(0, (Math.Min(maximumWidth, maximumHeight) - 1) / 2));
+            pointerHeight = Math.Min((int)((ambient ? 7 : 10) * scale),
+                Math.Max(0, maximumHeight - padding * 2 - 1));
             Size measured = TextRenderer.MeasureText(text, messageFont,
                 new Size(Math.Max(1, maximumWidth - padding * 2), int.MaxValue), TextFlags);
             ClientSize = new Size(Math.Clamp(measured.Width + padding * 2,
-                    Math.Min(maximumWidth, (int)(options.MinimumWidth * scale)), maximumWidth),
+                    Math.Min(maximumWidth, (int)((ambient ? 100 : options.MinimumWidth) * scale)), maximumWidth),
                 Math.Min(maximumHeight, measured.Height + padding * 2 + pointerHeight));
             textBounds = new Rectangle(padding, padding, Math.Max(1, Width - padding * 2),
                 Math.Max(1, Height - padding * 2 - pointerHeight));
@@ -98,14 +114,20 @@ internal sealed class MessageBubble : Form
         float radius = Math.Max(1, Math.Min(6 * scale, Math.Min(Width, bodyHeight) / 2 - 1));
         using GraphicsPath outline = new();
         outline.AddRoundedRectangle(new RectangleF(1, 1, Math.Max(1, Width - 3), Math.Max(1, bodyHeight - 2)), new SizeF(radius, radius));
-        using SolidBrush background = new(Color.FromArgb(255, 253, 248));
-        using Pen border = new(Color.FromArgb(42, 40, 37), Math.Max(1, 2 * scale));
+        bool ambient = style == MessageBubbleStyle.Ambient;
+        using SolidBrush background = new(ambient
+            ? Color.FromArgb(74, 73, 80)
+            : Color.FromArgb(255, 253, 248));
+        using Pen border = new(ambient
+            ? Color.FromArgb(42, 41, 47)
+            : Color.FromArgb(42, 40, 37), Math.Max(1, 2 * scale));
         args.Graphics.FillPath(background, outline);
         args.Graphics.DrawPath(border, outline);
         PointF[] pointer = [new(pointerX - 8 * scale, bodyHeight - scale), new(pointerX, Height - 1), new(pointerX + 8 * scale, bodyHeight - scale)];
         args.Graphics.FillPolygon(background, pointer);
         args.Graphics.DrawLines(border, pointer);
-        TextRenderer.DrawText(args.Graphics, message, messageFont, textBounds, Color.FromArgb(31, 29, 26), TextFlags);
+        TextRenderer.DrawText(args.Graphics, message, messageFont, textBounds,
+            ambient ? Color.FromArgb(235, 232, 226) : Color.FromArgb(31, 29, 26), TextFlags);
     }
 
     protected override void WndProc(ref Message message)
@@ -139,4 +161,10 @@ internal sealed class MessageBubble : Form
     [DllImport("gdi32.dll", CharSet = CharSet.Unicode)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool RemoveFontResourceEx(string fileName, uint flags, IntPtr reserved);
+}
+
+internal enum MessageBubbleStyle
+{
+    Default,
+    Ambient
 }

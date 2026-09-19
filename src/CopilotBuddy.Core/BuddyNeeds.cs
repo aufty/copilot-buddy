@@ -101,6 +101,15 @@ public sealed class BuddyNeedsController
         }
     }
 
+    public void SatisfyAll()
+    {
+        foreach (NeedState state in needs.Values)
+        {
+            state.Level = 1;
+        }
+        CurrentRequest = null;
+    }
+
     private double CreateDepletionRate(BuddyNeed need)
     {
         double seconds = need switch

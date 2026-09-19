@@ -7,6 +7,7 @@ namespace CopilotBuddy.Composition;
 
 internal sealed partial class ReplayWindow
 {
+    private static readonly TimeSpan NeedMessageSnoozeDuration = TimeSpan.FromMinutes(5);
     private readonly BuddyNeedsController buddyNeeds =
         new(new BuddyNeedsOptions(), new SystemRandomSource());
     private readonly System.Windows.Forms.Timer needsTimer = new() { Interval = 1000 };
@@ -36,6 +37,9 @@ internal sealed partial class ReplayWindow
     private bool ballPlayStarted;
     private int ballChasesRemaining;
     private string? supplyFeedbackMessage;
+    private BuddyNeed? displayedNeedRequest;
+    private BuddyNeed? snoozedNeedRequest;
+    private long needMessageSnoozeUntil;
     private readonly List<CompositionObject> heartResources = [];
     private ContainerVisual? heartVisual;
     private readonly List<CompositionObject> foodParticleResources = [];
@@ -46,13 +50,29 @@ internal sealed partial class ReplayWindow
     private CompositionScopedBatch? waterParticleBatch;
 
     private bool SupplyEngaged => engagedSupply is not null;
-    private string? SupplyMessage => supplyFeedbackMessage ?? buddyNeeds.CurrentRequest switch
+    private BuddyNeed? VisibleNeedRequest
+    {
+        get
+        {
+            if (!sessionSettings.CareSystemEnabled)
+            {
+                return null;
+            }
+            BuddyNeed? request = buddyNeeds.CurrentRequest;
+            return request is not null &&
+                (snoozedNeedRequest != request || Stopwatch.GetTimestamp() >= needMessageSnoozeUntil)
+                ? request
+                : null;
+        }
+    }
+    private string? NeedRequestMessage => VisibleNeedRequest switch
         {
             BuddyNeed.Food => "I'm hungry!",
             BuddyNeed.Water => "I'm thirsty!",
             BuddyNeed.Play => "I want to play!",
             _ => null
         };
+    private string? SupplyMessage => supplyFeedbackMessage ?? NeedRequestMessage;
 
     private void StartNeedsHost()
     {
@@ -62,7 +82,27 @@ internal sealed partial class ReplayWindow
             AdvanceNeeds();
             TryStartSupplyRetrieval();
         };
-        needsTimer.Start();
+        if (sessionSettings.CareSystemEnabled)
+        {
+            needsTimer.Start();
+        }
+    }
+
+    private void SetCareSystemEnabled(bool enabled)
+    {
+        if (enabled)
+        {
+            needsTimestamp = Stopwatch.GetTimestamp();
+            needsTimer.Start();
+            return;
+        }
+
+        needsTimer.Stop();
+        buddyNeeds.SatisfyAll();
+        displayedNeedRequest = null;
+        snoozedNeedRequest = null;
+        needMessageSnoozeUntil = 0;
+        RefreshAttention();
     }
 
     private void AdvanceNeeds()
@@ -74,12 +114,29 @@ internal sealed partial class ReplayWindow
         {
             return;
         }
-        BuddyNeed? previous = buddyNeeds.CurrentRequest;
         buddyNeeds.Tick(elapsed);
-        if (previous != buddyNeeds.CurrentRequest)
+        BuddyNeed? visibleRequest = VisibleNeedRequest;
+        if (displayedNeedRequest != visibleRequest)
         {
+            displayedNeedRequest = visibleRequest;
             RefreshAttention();
         }
+    }
+
+    private bool SnoozeNeedMessage(bool requirePresented)
+    {
+        BuddyNeed? request = VisibleNeedRequest;
+        if (request is null ||
+            (requirePresented && !string.Equals(controller?.Message, NeedRequestMessage, StringComparison.Ordinal)))
+        {
+            return false;
+        }
+        snoozedNeedRequest = request;
+        needMessageSnoozeUntil = Stopwatch.GetTimestamp() +
+            (long)(NeedMessageSnoozeDuration.TotalSeconds * Stopwatch.Frequency);
+        displayedNeedRequest = null;
+        RefreshAttention();
+        return true;
     }
 
     private SupplyItem? Chair => supplies.GetValueOrDefault(SupplyKind.Chair);
@@ -1018,6 +1075,12 @@ internal sealed partial class ReplayWindow
         if (fulfilled is { } need)
         {
             buddyNeeds.Fulfill(need);
+            if (snoozedNeedRequest == need)
+            {
+                snoozedNeedRequest = null;
+                needMessageSnoozeUntil = 0;
+            }
+            displayedNeedRequest = VisibleNeedRequest;
         }
         ShowHeart();
         RefreshAttention();
@@ -1132,6 +1195,11 @@ internal sealed partial class ReplayWindow
     {
         needsTimer.Stop();
         needsTimer.Dispose();
+        ClearCareSystemState();
+    }
+
+    private void ClearCareSystemState()
+    {
         supplyRetrieval?.Dispose();
         supplyRetrieval = null;
         currentSupplyTarget = null;

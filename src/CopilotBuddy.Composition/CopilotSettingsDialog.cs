@@ -30,6 +30,9 @@ internal sealed class CopilotSettingsDialog : Form
         float dpiScale,
         AssistantLaunchCommand currentCommand,
         string currentBuddy,
+        int currentDisplayScalePercent,
+        bool careSystemEnabled,
+        bool ambientQuipsEnabled,
         IReadOnlyList<BuddySprite> buddies,
         SessionShortcutSettings currentShortcuts,
         Func<SessionShortcutSettings, string?> applyShortcuts)
@@ -62,7 +65,30 @@ internal sealed class CopilotSettingsDialog : Form
         {
             Text = "SETTINGS",
             ForeColor = AccentColor,
-            Bounds = Scale(new Rectangle(14, 12, 652, 38), scale)
+            Bounds = Scale(new Rectangle(14, 12, 260, 38), scale)
+        };
+        Label displayScaleLabel = new()
+        {
+            Text = "DISPLAY SCALE",
+            ForeColor = HighlightColor,
+            Bounds = Scale(new Rectangle(300, 12, 174, 38), scale),
+            TextAlign = ContentAlignment.MiddleRight
+        };
+        ComboBox displayScale = new()
+        {
+            DropDownStyle = ComboBoxStyle.DropDownList,
+            FlatStyle = FlatStyle.Flat,
+            Bounds = Scale(new Rectangle(486, 15, 178, 32), scale),
+            BackColor = PanelColor,
+            ForeColor = TextColor,
+            AccessibleName = "Display scale"
+        };
+        displayScale.Items.AddRange(["Default (100%)", "150%", "200%"]);
+        displayScale.SelectedIndex = currentDisplayScalePercent switch
+        {
+            150 => 1,
+            200 => 2,
+            _ => 0
         };
         Label buddyLabel = new()
         {
@@ -135,36 +161,113 @@ internal sealed class CopilotSettingsDialog : Form
         validation.ForeColor = ErrorColor;
         validation.Bounds = Scale(new Rectangle(16, 327, 648, 26), scale);
 
+        Label careSystemLabel = new()
+        {
+            Text = "CARE SYSTEM",
+            ForeColor = HighlightColor,
+            Bounds = Scale(new Rectangle(16, 356, 172, 32), scale),
+            TextAlign = ContentAlignment.MiddleLeft
+        };
+        Label careSystemHint = new()
+        {
+            Text = "Needs stay fully satisfied while off.",
+            ForeColor = Color.FromArgb(182, 177, 195),
+            Bounds = Scale(new Rectangle(190, 356, 350, 32), scale),
+            TextAlign = ContentAlignment.MiddleLeft
+        };
+        CheckBox careSystem = new()
+        {
+            Checked = careSystemEnabled,
+            Appearance = Appearance.Button,
+            FlatStyle = FlatStyle.Flat,
+            Bounds = Scale(new Rectangle(554, 356, 110, 32), scale),
+            BackColor = PanelColor,
+            ForeColor = TextColor,
+            TextAlign = ContentAlignment.MiddleCenter,
+            AccessibleName = "Care System"
+        };
+        careSystem.FlatAppearance.BorderSize = Math.Max(1, (int)(2 * scale));
+        careSystem.FlatAppearance.BorderColor = EdgeColor;
+        careSystem.FlatAppearance.CheckedBackColor = AccentColor;
+        careSystem.FlatAppearance.MouseOverBackColor = HoverColor;
+        careSystem.FlatAppearance.MouseDownBackColor = HoverColor;
+        void UpdateCareSystemToggle()
+        {
+            careSystem.Text = careSystem.Checked ? "ON" : "OFF";
+            careSystem.ForeColor = careSystem.Checked ? BackgroundColor : TextColor;
+        }
+        careSystem.CheckedChanged += (_, _) => UpdateCareSystemToggle();
+        UpdateCareSystemToggle();
+
+        Label ambientQuipsLabel = new()
+        {
+            Text = "AMBIENT QUIPS",
+            ForeColor = HighlightColor,
+            Bounds = Scale(new Rectangle(16, 400, 172, 32), scale),
+            TextAlign = ContentAlignment.MiddleLeft
+        };
+        Label ambientQuipsHint = new()
+        {
+            Text = "Occasional dry observations.",
+            ForeColor = Color.FromArgb(182, 177, 195),
+            Bounds = Scale(new Rectangle(190, 400, 350, 32), scale),
+            TextAlign = ContentAlignment.MiddleLeft
+        };
+        CheckBox ambientQuips = new()
+        {
+            Checked = ambientQuipsEnabled,
+            Appearance = Appearance.Button,
+            FlatStyle = FlatStyle.Flat,
+            Bounds = Scale(new Rectangle(554, 400, 110, 32), scale),
+            BackColor = PanelColor,
+            ForeColor = TextColor,
+            TextAlign = ContentAlignment.MiddleCenter,
+            AccessibleName = "Ambient Quips"
+        };
+        ambientQuips.FlatAppearance.BorderSize = Math.Max(1, (int)(2 * scale));
+        ambientQuips.FlatAppearance.BorderColor = EdgeColor;
+        ambientQuips.FlatAppearance.CheckedBackColor = AccentColor;
+        ambientQuips.FlatAppearance.MouseOverBackColor = HoverColor;
+        ambientQuips.FlatAppearance.MouseDownBackColor = HoverColor;
+        void UpdateAmbientQuipsToggle()
+        {
+            ambientQuips.Text = ambientQuips.Checked ? "ON" : "OFF";
+            ambientQuips.ForeColor = ambientQuips.Checked ? BackgroundColor : TextColor;
+        }
+        ambientQuips.CheckedChanged += (_, _) => UpdateAmbientQuipsToggle();
+        UpdateAmbientQuipsToggle();
+
         Label shortcutsLabel = new()
         {
             Text = "SHORTCUTS",
             ForeColor = HighlightColor,
-            Bounds = Scale(new Rectangle(16, 356, 648, 28), scale)
+            Bounds = Scale(new Rectangle(16, 444, 648, 28), scale)
         };
         Label shortcutsHint = new()
         {
             Text = "Click a shortcut box, then press a chord with Alt, Ctrl, or Shift.",
             ForeColor = Color.FromArgb(182, 177, 195),
-            Bounds = Scale(new Rectangle(16, 384, 648, 26), scale)
+            Bounds = Scale(new Rectangle(16, 472, 648, 26), scale)
         };
-        AddShortcutRow("Summon", currentShortcuts.Summon, 414, scale);
-        AddShortcutRow("Buddy Menu", currentShortcuts.SkillMenu, 448, scale);
-        AddShortcutRow("Inquire", currentShortcuts.Inquire, 482, scale);
-        AddShortcutRow("Handoff", currentShortcuts.Handoff, 516, scale);
-        AddShortcutRow("Gather", currentShortcuts.Gather, 550, scale);
-        AddShortcutRow("Store", currentShortcuts.Store, 584, scale);
+        AddShortcutRow("Summon", currentShortcuts.Summon, 502, scale);
+        AddShortcutRow("Buddy Menu", currentShortcuts.SkillMenu, 536, scale);
+        AddShortcutRow("Inquire", currentShortcuts.Inquire, 570, scale);
+        AddShortcutRow("Handoff", currentShortcuts.Handoff, 604, scale);
+        AddShortcutRow("Gather", currentShortcuts.Gather, 638, scale);
+        AddShortcutRow("Store", currentShortcuts.Store, 672, scale);
         shortcutValidation.ForeColor = ErrorColor;
-        shortcutValidation.Bounds = Scale(new Rectangle(16, 620, 648, 26), scale);
+        shortcutValidation.Bounds = Scale(new Rectangle(16, 708, 648, 26), scale);
 
         Button reset = new() { Text = "Reset" };
-        ConfigureButton(reset, new Rectangle(16, 642, 110, 38), scale);
-        ConfigureButton(save, new Rectangle(436, 642, 110, 38), scale);
+        ConfigureButton(reset, new Rectangle(16, 730, 110, 38), scale);
+        ConfigureButton(save, new Rectangle(436, 730, 110, 38), scale);
         Button cancel = new()
         {
             Text = "Cancel",
             DialogResult = DialogResult.Cancel
         };
-        ConfigureButton(cancel, new Rectangle(554, 642, 110, 38), scale);
+        ConfigureButton(cancel, new Rectangle(554, 730, 110, 38), scale);
+        ClientSize = new Size((int)(680 * scale), (int)(778 * scale));
 
         command.TextChanged += (_, _) => ValidateCommand();
         reset.Click += (_, _) =>
@@ -183,7 +286,13 @@ internal sealed class CopilotSettingsDialog : Form
                     shortcutValidation.Text = shortcutError;
                     return;
                 }
-                result = new SettingsDialogResult(parsed!, selectedBuddy, shortcuts!);
+                result = new SettingsDialogResult(
+                    parsed!, selectedBuddy, displayScale.SelectedIndex switch
+                    {
+                        1 => 150,
+                        2 => 200,
+                        _ => 100
+                    }, careSystem.Checked, ambientQuips.Checked, shortcuts!);
                 DialogResult = DialogResult.OK;
             }
         };
@@ -191,8 +300,10 @@ internal sealed class CopilotSettingsDialog : Form
         AcceptButton = save;
         CancelButton = cancel;
         Controls.AddRange([
-            heading, buddyLabel, buddyOptions, commandLabel, command, hint, validation,
-            shortcutsLabel, shortcutsHint, shortcutValidation, reset, save, cancel
+            heading, displayScaleLabel, displayScale, buddyLabel, buddyOptions, commandLabel, command, hint, validation,
+            careSystemLabel, careSystemHint, careSystem, shortcutsLabel, shortcutsHint,
+            ambientQuipsLabel, ambientQuipsHint, ambientQuips,
+            shortcutValidation, reset, save, cancel
         ]);
         ValidateCommand();
     }
@@ -202,6 +313,9 @@ internal sealed class CopilotSettingsDialog : Form
         float dpiScale,
         AssistantLaunchCommand currentCommand,
         string currentBuddy,
+        int currentDisplayScalePercent,
+        bool careSystemEnabled,
+        bool ambientQuipsEnabled,
         SessionShortcutSettings currentShortcuts,
         Func<SessionShortcutSettings, string?> applyShortcuts)
     {
@@ -212,7 +326,9 @@ internal sealed class CopilotSettingsDialog : Form
                 $"No {BuddySpriteCatalog.SheetWidth}x{BuddySpriteCatalog.SheetHeight} buddy sprite sheets were found.");
         }
         using CopilotSettingsDialog dialog = new(
-            dpiScale, currentCommand, currentBuddy, buddies, currentShortcuts, applyShortcuts);
+            dpiScale, currentCommand, currentBuddy, currentDisplayScalePercent,
+            careSystemEnabled, ambientQuipsEnabled,
+            buddies, currentShortcuts, applyShortcuts);
         return dialog.ShowDialog(owner) == DialogResult.OK ? dialog.result : null;
     }
 
@@ -387,6 +503,9 @@ internal sealed class CopilotSettingsDialog : Form
 internal sealed record SettingsDialogResult(
     AssistantLaunchCommand CopilotLaunch,
     string Buddy,
+    int DisplayScalePercent,
+    bool CareSystemEnabled,
+    bool AmbientQuipsEnabled,
     SessionShortcutSettings Shortcuts);
 
 internal sealed class ShortcutCaptureBox : TextBox

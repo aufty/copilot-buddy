@@ -22,19 +22,6 @@ internal sealed partial class ReplayWindow
     private void AddPresentationMenu()
     {
         AddSessionMenu();
-        exitMenu.Items.Add("Show demo message", null, (_, _) => ChangePresentation(() => controller!.ShowMessage(DemoMessage)));
-        ToolStripMenuItem dismiss = new("Dismiss message");
-        dismiss.Click += (_, _) => ChangePresentation(() => controller!.DismissMessage());
-        exitMenu.Items.Add(dismiss);
-        ToolStripMenuItem visible = new("Copilot Buddy visible") { CheckOnClick = true, Checked = true };
-        visible.Click += (_, _) => ChangeVisibility(visible.Checked);
-        exitMenu.Items.Add(visible);
-        exitMenu.Opening += (_, _) =>
-        {
-            dismiss.Enabled = controller?.Message is not null;
-            visible.Checked = controller?.IsVisible ?? true;
-        };
-        exitMenu.Items.Add(new ToolStripSeparator());
     }
 
     private void StartPresentationHost()
@@ -56,6 +43,7 @@ internal sealed partial class ReplayWindow
         StartSessionIntegration();
         StartPresentHost();
         StartNeedsHost();
+        StartAmbientQuips();
         pipeServer = new NamedPipeCommandServer(presentation.PipeName, HandleRequestAsync);
         _ = Task.Run(() => pipeServer.RunAsync(pipeCancellation.Token));
         pointerTimer.Start();
@@ -69,6 +57,7 @@ internal sealed partial class ReplayWindow
     {
         StopAttentionBounce();
         StopSessionLaunchJump();
+        StopAmbientQuips();
         StopNeedsHost();
         StopPresentHost();
         StopSessionIntegration();
@@ -90,7 +79,7 @@ internal sealed partial class ReplayWindow
             {
                 PipeProtocol.Show when string.IsNullOrWhiteSpace(request.Text) => "The show command requires non-empty text.",
                 PipeProtocol.Show when request.Text!.Length > PipeProtocol.MaximumMessageLength => $"Message exceeds {PipeProtocol.MaximumMessageLength} characters.",
-                PipeProtocol.Show or PipeProtocol.Dismiss => null,
+                PipeProtocol.Show or PipeProtocol.Dismiss or PipeProtocol.Quip => null,
                 PipeProtocol.Visible when request.Visible is null => "The visible command requires a boolean value.",
                 PipeProtocol.Visible => null,
                 _ => $"Unknown presentation command '{request.Command}'."
@@ -112,6 +101,9 @@ internal sealed partial class ReplayWindow
                 case PipeProtocol.Visible:
                     ChangeVisibility(request.Visible!.Value);
                     break;
+                case PipeProtocol.Quip:
+                    TriggerAmbientQuip();
+                    break;
             }
         }, pipeCancellation.Token);
         return new PresentationResponse(PipeProtocol.Version, true);
@@ -122,6 +114,14 @@ internal sealed partial class ReplayWindow
 
     private async Task HandleActionRequestedAsync()
     {
+        if (DismissAmbientQuip())
+        {
+            return;
+        }
+        if (SnoozeNeedMessage(requirePresented: true))
+        {
+            return;
+        }
         if (contextPressure.Presented is not null && await HandleContextActionAsync())
         {
             return;
@@ -339,17 +339,20 @@ internal sealed partial class ReplayWindow
         }
         PresentationSnapshot snapshot = controller!.Snapshot;
         bubble.IsInteractive = HasSessionAction;
-        if (!snapshot.IsVisible || snapshot.Message is null)
+        string? message = snapshot.Message ?? ambientQuip;
+        if (!snapshot.IsVisible || message is null)
         {
             bubble.Hide();
             return;
         }
-        Vector3 position = snapshot.State == VisualState.Attention && bubblePosition is not null
+        bool ambient = snapshot.Message is null;
+        Vector3 position = (snapshot.State == VisualState.Attention || ambient) && bubblePosition is not null
             ? bubblePosition.Position
             : PositionOf(snapshot);
         Point anchor = PointToScreen(new Point((int)(position.X + spriteWidth / 2 * dpiScale),
             (int)(position.Y + spriteHeight * (1 - snapshot.ScaleY) * dpiScale)));
-        bubble.Present(this, snapshot.Message, anchor, RectangleToScreen(ClientRectangle), dpiScale);
+        bubble.Present(this, message, anchor, RectangleToScreen(ClientRectangle), dpiScale,
+            ambient ? MessageBubbleStyle.Ambient : MessageBubbleStyle.Default);
     }
 
     private sealed class BubblePositionObserver : IInteractionTrackerOwner, IDisposable

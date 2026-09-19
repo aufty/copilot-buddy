@@ -99,6 +99,7 @@ internal sealed partial class ReplayWindow : Form
     private PassiveMotionPlan? activePassiveMotion;
     private readonly System.Windows.Forms.Timer pointerTimer = new() { Interval = 20 };
     private readonly ContextMenuStrip exitMenu = new();
+    private readonly Icon taskbarIcon;
     private NotifyIcon? trayIcon;
     private bool hovered;
     private bool repositioning;
@@ -122,6 +123,8 @@ internal sealed partial class ReplayWindow : Form
         assistantSessions = sessions;
         sessionSettings = settings;
         presentation.Validate();
+        taskbarIcon = CreateSproutTaskbarIcon();
+        Icon = taskbarIcon;
         Text = ReplayOnly ? "Copilot Buddy - Composition replay" : "Copilot Buddy - Composition drag trial";
         FormBorderStyle = TaskbarMode ? FormBorderStyle.None : FormBorderStyle.FixedSingle;
         MaximizeBox = false;
@@ -231,7 +234,7 @@ internal sealed partial class ReplayWindow : Form
         }
         if (TaskbarMode)
         {
-            trayIcon = new NotifyIcon { Icon = SystemIcons.Application, Text = "Copilot Buddy", ContextMenuStrip = exitMenu, Visible = true };
+            trayIcon = new NotifyIcon { Icon = taskbarIcon, Text = "Copilot Buddy", ContextMenuStrip = exitMenu, Visible = true };
             StartPassiveMotion();
             SystemEvents.DisplaySettingsChanged += OnDisplaySettingsChanged;
             SystemEvents.UserPreferenceChanged += OnUserPreferenceChanged;
@@ -264,7 +267,7 @@ internal sealed partial class ReplayWindow : Form
                 Math.Min((int)(540 * scale), (int)(workArea.Height * 0.8)));
             Location = new Point(workArea.Left + (workArea.Width - Width) / 2, workArea.Top + (workArea.Height - Height) / 2);
         }
-        dpiScale = DeviceDpi / 96f;
+        dpiScale = DeviceDpi / 96f * sessionSettings.EffectiveDisplayScale;
     }
 
     private void LoadSpriteFrames()
@@ -317,6 +320,49 @@ internal sealed partial class ReplayWindow : Form
             sprite.Children.InsertAtTop(layer);
         }
         opaquePixels = frameMasks[SpriteFrame.Standing];
+    }
+
+    private static Icon CreateSproutTaskbarIcon()
+    {
+        string path = Path.Combine(BuddySpriteCatalog.DirectoryPath, $"{BuddySpriteCatalog.DefaultName}.png");
+        using Bitmap sheet = new(path);
+        using Bitmap iconBitmap = new(32, 32, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+        using (Graphics graphics = Graphics.FromImage(iconBitmap))
+        {
+            graphics.Clear(Color.Transparent);
+            graphics.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.NearestNeighbor;
+            graphics.PixelOffsetMode = System.Drawing.Drawing2D.PixelOffsetMode.Half;
+
+            const int height = 30;
+            int width = BuddySpriteCatalog.FrameWidth * height / BuddySpriteCatalog.FrameHeight;
+            Rectangle destination = new((iconBitmap.Width - width) / 2, iconBitmap.Height - height, width, height);
+            graphics.DrawImage(sheet, destination,
+                new Rectangle(0, 0, BuddySpriteCatalog.FrameWidth, BuddySpriteCatalog.FrameHeight),
+                GraphicsUnit.Pixel);
+        }
+
+        for (int y = 0; y < iconBitmap.Height; y++)
+        {
+            for (int x = 0; x < iconBitmap.Width; x++)
+            {
+                Color pixel = iconBitmap.GetPixel(x, y);
+                if (pixel.A > 0 && pixel.R == 255 && pixel.G == 255 && pixel.B == 255)
+                {
+                    iconBitmap.SetPixel(x, y, Color.Transparent);
+                }
+            }
+        }
+
+        nint handle = iconBitmap.GetHicon();
+        try
+        {
+            using Icon icon = Icon.FromHandle(handle);
+            return (Icon)icon.Clone();
+        }
+        finally
+        {
+            DestroyIcon(handle);
+        }
     }
 
     private void ShowFrame(SpriteFrame frame)
@@ -1250,6 +1296,7 @@ internal sealed partial class ReplayWindow : Form
         SystemEvents.UserPreferenceChanged -= OnUserPreferenceChanged;
         StopActivityMonitoring();
         trayIcon?.Dispose();
+        taskbarIcon.Dispose();
         exitMenu.Dispose();
         interactionTestTimer?.Dispose();
         if (interactionSmoke && controller is not null)
@@ -1300,6 +1347,10 @@ internal sealed partial class ReplayWindow : Form
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     private static extern uint RegisterWindowMessage(string message);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool DestroyIcon(nint icon);
 
     [ComImport, Guid("29E691FA-4567-4DCA-B319-D0F207EB6807"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
     private interface ICompositorDesktopInterop
