@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Formats.Tar;
 using System.IO.Compression;
 using System.Runtime.InteropServices;
@@ -117,41 +118,51 @@ internal static class CopilotRuntimeCompatibility
         CancellationToken cancellationToken)
     {
         string cacheRoot = Path.Combine(localData, "CopilotBuddy", "copilot-runtime-source");
-        string destination = Path.Combine(cacheRoot, $"{Version}-win32-{architecture}");
-        if (File.Exists(Path.Combine(destination, "package.json")) &&
-            File.Exists(Path.Combine(destination, "app.js")))
+        string destination = Path.Combine(cacheRoot, $"{Version}-win32-{architecture}-v2");
+        string source = Path.Combine(destination, "package");
+        string marker = Path.Combine(destination, ".complete");
+        if (File.Exists(marker) &&
+            File.Exists(Path.Combine(source, "package.json")) &&
+            File.Exists(Path.Combine(source, "app.js")))
         {
-            return destination;
+            return source;
         }
 
         Directory.CreateDirectory(cacheRoot);
-        string staging = destination + "." + Guid.NewGuid().ToString("N");
-        Directory.CreateDirectory(staging);
+        if (Directory.Exists(destination))
+        {
+            Directory.Delete(destination, recursive: true);
+        }
+        Directory.CreateDirectory(destination);
         try
         {
             using FileStream file = File.OpenRead(archive);
             using GZipStream gzip = new(file, CompressionMode.Decompress);
-            TarFile.ExtractToDirectory(gzip, staging, overwriteFiles: false);
+            TarFile.ExtractToDirectory(gzip, destination, overwriteFiles: false);
             cancellationToken.ThrowIfCancellationRequested();
 
-            string extracted = Path.Combine(staging, "package");
-            if (!File.Exists(Path.Combine(extracted, "package.json")))
+            if (!File.Exists(Path.Combine(source, "package.json")) ||
+                !File.Exists(Path.Combine(source, "app.js")))
             {
                 throw new InvalidDataException("The bundled Copilot runtime archive has an unexpected layout.");
             }
-            if (Directory.Exists(destination))
-            {
-                Directory.Delete(destination, recursive: true);
-            }
-            Directory.Move(extracted, destination);
-            return destination;
+            File.WriteAllText(marker, Version);
+            return source;
         }
-        finally
+        catch
         {
-            if (Directory.Exists(staging))
+            try
             {
-                Directory.Delete(staging, recursive: true);
+                if (Directory.Exists(destination))
+                {
+                    Directory.Delete(destination, recursive: true);
+                }
             }
+            catch (Exception cleanupException) when (cleanupException is IOException or UnauthorizedAccessException)
+            {
+                Debug.WriteLine(cleanupException);
+            }
+            throw;
         }
     }
 
