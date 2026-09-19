@@ -30,6 +30,9 @@ taking control away from the terminal.
 3. Run the downloaded executable.
 
 The release is self-contained, so the .NET SDK and runtime are not required.
+It also includes the validated Copilot runtime used by Buddy; the separate
+GitHub Copilot CLI installation provides the signed-in command and terminal
+experience.
 
 Copilot Buddy is not currently code-signed. Windows Defender SmartScreen may
 show **Windows protected your PC** the first time it runs. If you downloaded

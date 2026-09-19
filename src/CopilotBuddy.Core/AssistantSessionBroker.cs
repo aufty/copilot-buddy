@@ -9,8 +9,8 @@ namespace CopilotBuddy.Core;
 
 public static class AssistantBrokerProtocol
 {
-    public const int Version = 11;
-    public const string PipeName = "CopilotBuddy.AssistantBroker.v11";
+    public const int Version = 12;
+    public const string PipeName = "CopilotBuddy.AssistantBroker.v12";
     public const string Request = "request";
     public const string Response = "response";
     public const string Event = "event";

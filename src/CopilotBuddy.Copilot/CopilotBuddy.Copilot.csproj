@@ -3,10 +3,24 @@
     <TargetFramework>net10.0-windows10.0.22000.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
-    <CopilotSkipCliDownload>true</CopilotSkipCliDownload>
+    <RuntimeIdentifier Condition="'$(RuntimeIdentifier)' == '' And '$(CopilotBuddyRuntimeIdentifier)' != ''">$(CopilotBuddyRuntimeIdentifier)</RuntimeIdentifier>
+    <CopilotCliVersion>1.0.86-2</CopilotCliVersion>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\CopilotBuddy.Core\CopilotBuddy.Core.csproj" />
     <PackageReference Include="GitHub.Copilot.SDK" Version="1.0.14" />
   </ItemGroup>
+  <Target Name="RegisterCopilotBuddyRuntime"
+          BeforeTargets="_RegisterCopilotCliForCopy;_CopyCopilotCliToOutput;GetCopyToOutputDirectoryItems;GetCopyToPublishDirectoryItems"
+          DependsOnTargets="_DownloadCopilotCli">
+    <ItemGroup>
+      <ContentWithTargetPath Include="$(_CopilotCacheDir)\copilot.tgz"
+                             TargetPath="CopilotRuntime\copilot.tgz"
+                             CopyToOutputDirectory="PreserveNewest"
+                             CopyToPublishDirectory="PreserveNewest" />
+    </ItemGroup>
+    <PropertyGroup>
+      <CopilotSkipCliDownload>true</CopilotSkipCliDownload>
+    </PropertyGroup>
+  </Target>
 </Project>

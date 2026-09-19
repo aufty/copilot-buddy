@@ -5,11 +5,12 @@
     <UseWindowsForms>true</UseWindowsForms>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
-    <CopilotSkipCliDownload>true</CopilotSkipCliDownload>
   </PropertyGroup>
   <ItemGroup>
-    <ProjectReference Include="..\CopilotBuddy.Core\CopilotBuddy.Core.csproj" />
-    <ProjectReference Include="..\CopilotBuddy.Copilot\CopilotBuddy.Copilot.csproj" />
+    <ProjectReference Include="..\CopilotBuddy.Core\CopilotBuddy.Core.csproj"
+                      AdditionalProperties="CopilotBuddyRuntimeIdentifier=$(RuntimeIdentifier)" />
+    <ProjectReference Include="..\CopilotBuddy.Copilot\CopilotBuddy.Copilot.csproj"
+                      AdditionalProperties="CopilotBuddyRuntimeIdentifier=$(RuntimeIdentifier)" />
     <Content Include="Assets\Sprites\**\*.png" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="Assets\Fonts\*" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="presentation.json" CopyToOutputDirectory="PreserveNewest" />
