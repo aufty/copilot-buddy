@@ -61,10 +61,24 @@ internal sealed partial class ReplayWindow
     }
 
     private void OnStoredSessionAdded(object? sender, AssistantStoredSession storedSession) =>
-        PostSessionUpdate(() => DropStoredPresent(storedSession));
+        PostSessionUpdate(() => PresentStoredSession(storedSession));
 
     private void OnStoredSessionRemoved(object? sender, string sessionId) =>
-        PostSessionUpdate(() => ClearStoredPresent(sessionId));
+        PostSessionUpdate(() =>
+        {
+            deferredStoredPresents.Remove(sessionId);
+            ClearStoredPresent(sessionId);
+        });
+
+    private void PresentStoredSession(AssistantStoredSession storedSession)
+    {
+        if (visitingHandoffWindow)
+        {
+            deferredStoredPresents[storedSession.SessionId] = storedSession;
+            return;
+        }
+        DropStoredPresent(storedSession);
+    }
 
     private void DropStoredPresent(AssistantStoredSession storedSession)
     {

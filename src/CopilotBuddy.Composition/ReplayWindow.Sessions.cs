@@ -33,6 +33,7 @@ internal sealed partial class ReplayWindow
     private TaskCompletionSource<long>? handoffWindowArrival;
     private TaskCompletionSource<long>? handoffTaskbarArrival;
     private AssistantHandoff? deferredHandoffPresent;
+    private readonly Dictionary<string, AssistantStoredSession> deferredStoredPresents = [];
     private bool visitingHandoffWindow;
     private bool endingHandoffWindowVisit;
     private bool restoringTaskbarAfterHandoffJump;
@@ -384,13 +385,14 @@ internal sealed partial class ReplayWindow
                 _ = BeginHandoffWindowVisit(windowBounds);
             }
             string? label;
+            Task<long>? taskbarArrival;
             try
             {
                 label = StoredSessionNameDialog.Ask(this, dpiScale, target.WindowBounds);
             }
             finally
             {
-                _ = EndHandoffWindowVisit();
+                taskbarArrival = EndHandoffWindowVisit();
             }
             if (label is null)
             {
@@ -405,6 +407,11 @@ internal sealed partial class ReplayWindow
             {
                 ShowSessionError("The highlighted Copilot session could not be stored.");
                 return;
+            }
+            PresentStoredSession(storedSession);
+            if (taskbarArrival is not null)
+            {
+                await taskbarArrival.WaitAsync(sessionCancellation.Token);
             }
             try
             {
@@ -980,6 +987,15 @@ internal sealed partial class ReplayWindow
                 DropHandoffPresent(handoff);
             }
         }
+        if (!sessionsStopping && deferredStoredPresents.Count > 0)
+        {
+            AssistantStoredSession[] storedSessions = deferredStoredPresents.Values.ToArray();
+            deferredStoredPresents.Clear();
+            foreach (AssistantStoredSession storedSession in storedSessions)
+            {
+                DropStoredPresent(storedSession);
+            }
+        }
     }
 
     private void StopHandoffWindowJump()
@@ -1310,6 +1326,7 @@ internal sealed partial class ReplayWindow
     {
         sessionsStopping = true;
         deferredHandoffPresent = null;
+        deferredStoredPresents.Clear();
         StopSessionLaunchJump();
         UnregisterShortcuts();
         sessionCancellation.Cancel();

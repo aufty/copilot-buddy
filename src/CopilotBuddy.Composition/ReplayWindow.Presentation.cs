@@ -8,7 +8,8 @@ namespace CopilotBuddy.Composition;
 
 internal sealed partial class ReplayWindow
 {
-    private const string DemoMessage = "Hello from Copilot Buddy!";
+    private string DemoMessage =>
+        $"Hello! Press {sessionSettings.Shortcuts.SkillMenu} to see what I can do!";
     private readonly CancellationTokenSource pipeCancellation = new();
     private NamedPipeCommandServer? pipeServer;
     private MessageBubble? bubble;
