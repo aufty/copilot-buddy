@@ -18,8 +18,11 @@ internal sealed class CopilotSettingsDialog : Form
     private readonly PrivateFontCollection fonts = new();
     private readonly TextBox command = new();
     private readonly Label validation = new();
-    private readonly Button save = new() { Text = "Save" };
+    private readonly Label shortcutValidation = new();
+    private readonly Button save = new() { Text = "Confirm" };
     private readonly List<Image> avatarImages = [];
+    private readonly Dictionary<string, ShortcutCaptureBox> shortcutInputs = [];
+    private readonly Func<SessionShortcutSettings, string?> applyShortcuts;
     private string selectedBuddy;
     private SettingsDialogResult? result;
 
@@ -27,8 +30,11 @@ internal sealed class CopilotSettingsDialog : Form
         float dpiScale,
         AssistantLaunchCommand currentCommand,
         string currentBuddy,
-        IReadOnlyList<BuddySprite> buddies)
+        IReadOnlyList<BuddySprite> buddies,
+        SessionShortcutSettings currentShortcuts,
+        Func<SessionShortcutSettings, string?> applyShortcuts)
     {
+        this.applyShortcuts = applyShortcuts;
         fonts.AddFontFile(Path.Combine(AppContext.BaseDirectory, "Assets", "Fonts", "VT323-Regular.ttf"));
         float scale = Math.Max(1, dpiScale);
         selectedBuddy = buddies.FirstOrDefault(buddy =>
@@ -50,7 +56,7 @@ internal sealed class CopilotSettingsDialog : Form
         TopMost = true;
         BackColor = BackgroundColor;
         ForeColor = TextColor;
-        ClientSize = new Size((int)(680 * scale), (int)(405 * scale));
+        ClientSize = new Size((int)(680 * scale), (int)(690 * scale));
 
         Label heading = new()
         {
@@ -129,28 +135,55 @@ internal sealed class CopilotSettingsDialog : Form
         validation.ForeColor = ErrorColor;
         validation.Bounds = Scale(new Rectangle(16, 327, 648, 26), scale);
 
-        Button reset = new() { Text = "Use default" };
-        ConfigureButton(reset, new Rectangle(16, 354, 120, 38), scale);
-        ConfigureButton(save, new Rectangle(436, 354, 110, 38), scale);
+        Label shortcutsLabel = new()
+        {
+            Text = "SHORTCUTS",
+            ForeColor = HighlightColor,
+            Bounds = Scale(new Rectangle(16, 356, 648, 28), scale)
+        };
+        Label shortcutsHint = new()
+        {
+            Text = "Click a shortcut box, then press a chord with Alt, Ctrl, or Shift.",
+            ForeColor = Color.FromArgb(182, 177, 195),
+            Bounds = Scale(new Rectangle(16, 384, 648, 26), scale)
+        };
+        AddShortcutRow("Summon", currentShortcuts.Summon, 414, scale);
+        AddShortcutRow("Buddy Menu", currentShortcuts.SkillMenu, 448, scale);
+        AddShortcutRow("Inquire", currentShortcuts.Inquire, 482, scale);
+        AddShortcutRow("Handoff", currentShortcuts.Handoff, 516, scale);
+        AddShortcutRow("Gather", currentShortcuts.Gather, 550, scale);
+        AddShortcutRow("Store", currentShortcuts.Store, 584, scale);
+        shortcutValidation.ForeColor = ErrorColor;
+        shortcutValidation.Bounds = Scale(new Rectangle(16, 620, 648, 26), scale);
+
+        Button reset = new() { Text = "Reset" };
+        ConfigureButton(reset, new Rectangle(16, 642, 110, 38), scale);
+        ConfigureButton(save, new Rectangle(436, 642, 110, 38), scale);
         Button cancel = new()
         {
             Text = "Cancel",
             DialogResult = DialogResult.Cancel
         };
-        ConfigureButton(cancel, new Rectangle(554, 354, 110, 38), scale);
+        ConfigureButton(cancel, new Rectangle(554, 642, 110, 38), scale);
 
         command.TextChanged += (_, _) => ValidateCommand();
         reset.Click += (_, _) =>
         {
-            command.Text = AssistantLaunchCommand.Default.ToString();
-            command.Focus();
-            command.SelectAll();
+            SetShortcuts(SessionShortcutSettings.Default);
+            shortcutValidation.Text = "";
         };
         save.Click += (_, _) =>
         {
-            if (TryParseCommand(out AssistantLaunchCommand? parsed))
+            if (TryParseCommand(out AssistantLaunchCommand? parsed) &&
+                TryReadShortcuts(out SessionShortcutSettings? shortcuts))
             {
-                result = new SettingsDialogResult(parsed!, selectedBuddy);
+                string? shortcutError = applyShortcuts(shortcuts!);
+                if (shortcutError is not null)
+                {
+                    shortcutValidation.Text = shortcutError;
+                    return;
+                }
+                result = new SettingsDialogResult(parsed!, selectedBuddy, shortcuts!);
                 DialogResult = DialogResult.OK;
             }
         };
@@ -158,7 +191,8 @@ internal sealed class CopilotSettingsDialog : Form
         AcceptButton = save;
         CancelButton = cancel;
         Controls.AddRange([
-            heading, buddyLabel, buddyOptions, commandLabel, command, hint, validation, reset, save, cancel
+            heading, buddyLabel, buddyOptions, commandLabel, command, hint, validation,
+            shortcutsLabel, shortcutsHint, shortcutValidation, reset, save, cancel
         ]);
         ValidateCommand();
     }
@@ -167,7 +201,9 @@ internal sealed class CopilotSettingsDialog : Form
         IWin32Window owner,
         float dpiScale,
         AssistantLaunchCommand currentCommand,
-        string currentBuddy)
+        string currentBuddy,
+        SessionShortcutSettings currentShortcuts,
+        Func<SessionShortcutSettings, string?> applyShortcuts)
     {
         IReadOnlyList<BuddySprite> buddies = BuddySpriteCatalog.GetAvailable();
         if (buddies.Count == 0)
@@ -175,7 +211,8 @@ internal sealed class CopilotSettingsDialog : Form
             throw new InvalidOperationException(
                 $"No {BuddySpriteCatalog.SheetWidth}x{BuddySpriteCatalog.SheetHeight} buddy sprite sheets were found.");
         }
-        using CopilotSettingsDialog dialog = new(dpiScale, currentCommand, currentBuddy, buddies);
+        using CopilotSettingsDialog dialog = new(
+            dpiScale, currentCommand, currentBuddy, buddies, currentShortcuts, applyShortcuts);
         return dialog.ShowDialog(owner) == DialogResult.OK ? dialog.result : null;
     }
 
@@ -225,6 +262,75 @@ internal sealed class CopilotSettingsDialog : Form
         }
     }
 
+    private void AddShortcutRow(string name, string shortcut, int y, float scale)
+    {
+        Label label = new()
+        {
+            Text = name,
+            ForeColor = TextColor,
+            Bounds = Scale(new Rectangle(16, y, 172, 30), scale),
+            TextAlign = ContentAlignment.MiddleLeft
+        };
+        ShortcutCaptureBox input = new()
+        {
+            Text = shortcut,
+            Bounds = Scale(new Rectangle(190, y, 474, 30), scale),
+            BackColor = PanelColor,
+            ForeColor = TextColor,
+            BorderStyle = BorderStyle.FixedSingle,
+            AccessibleName = $"{name} shortcut"
+        };
+        input.ShortcutCaptured += (_, _) => shortcutValidation.Text = "";
+        input.CaptureRejected += message => shortcutValidation.Text = message;
+        shortcutInputs.Add(name, input);
+        Controls.Add(label);
+        Controls.Add(input);
+    }
+
+    private bool TryReadShortcuts(out SessionShortcutSettings? shortcuts)
+    {
+        shortcuts = new SessionShortcutSettings(
+            shortcutInputs["Summon"].Text,
+            shortcutInputs["Buddy Menu"].Text,
+            shortcutInputs["Inquire"].Text,
+            shortcutInputs["Handoff"].Text,
+            shortcutInputs["Gather"].Text,
+            shortcutInputs["Store"].Text);
+        Dictionary<ShortcutBinding, string> used = [];
+        try
+        {
+            foreach ((string name, string shortcut) in shortcuts.All())
+            {
+                ShortcutBinding binding = ShortcutBinding.Parse(shortcut);
+                if (used.TryGetValue(binding, out string? existing))
+                {
+                    shortcutValidation.Text = $"{name} and {existing} use the same shortcut.";
+                    shortcuts = null;
+                    return false;
+                }
+                used.Add(binding, name);
+            }
+            shortcutValidation.Text = "";
+            return true;
+        }
+        catch (ArgumentException exception)
+        {
+            shortcutValidation.Text = exception.Message;
+            shortcuts = null;
+            return false;
+        }
+    }
+
+    private void SetShortcuts(SessionShortcutSettings shortcuts)
+    {
+        shortcutInputs["Summon"].Text = shortcuts.Summon;
+        shortcutInputs["Buddy Menu"].Text = shortcuts.SkillMenu;
+        shortcutInputs["Inquire"].Text = shortcuts.Inquire;
+        shortcutInputs["Handoff"].Text = shortcuts.Handoff;
+        shortcutInputs["Gather"].Text = shortcuts.Gather;
+        shortcutInputs["Store"].Text = shortcuts.Store;
+    }
+
     private void ConfigureButton(Button button, Rectangle bounds, float scale)
     {
         button.Bounds = Scale(bounds, scale);
@@ -246,16 +352,17 @@ internal sealed class CopilotSettingsDialog : Form
 
     private static Bitmap CreateAvatar(string path, float scale)
     {
+        const int previewScale = 3;
         using Bitmap sheet = new(path);
-        int width = (int)(BuddySpriteCatalog.FrameWidth * 4 * scale);
-        int height = (int)(BuddySpriteCatalog.FrameHeight / 2 * 4 * scale);
+        int width = (int)(BuddySpriteCatalog.FrameWidth * previewScale * scale);
+        int height = (int)(BuddySpriteCatalog.FrameHeight * previewScale * scale);
         Bitmap avatar = new(width, height);
         using Graphics graphics = Graphics.FromImage(avatar);
         graphics.InterpolationMode = InterpolationMode.NearestNeighbor;
         graphics.PixelOffsetMode = PixelOffsetMode.Half;
         graphics.DrawImage(sheet,
             new Rectangle(0, 0, width, height),
-            new Rectangle(0, 0, BuddySpriteCatalog.FrameWidth, BuddySpriteCatalog.FrameHeight / 2),
+            new Rectangle(0, 0, BuddySpriteCatalog.FrameWidth, BuddySpriteCatalog.FrameHeight),
             GraphicsUnit.Pixel);
         return avatar;
     }
@@ -277,4 +384,47 @@ internal sealed class CopilotSettingsDialog : Form
     private static extern bool SetForegroundWindow(nint window);
 }
 
-internal sealed record SettingsDialogResult(AssistantLaunchCommand CopilotLaunch, string Buddy);
+internal sealed record SettingsDialogResult(
+    AssistantLaunchCommand CopilotLaunch,
+    string Buddy,
+    SessionShortcutSettings Shortcuts);
+
+internal sealed class ShortcutCaptureBox : TextBox
+{
+    public ShortcutCaptureBox()
+    {
+        ReadOnly = true;
+        Cursor = Cursors.Hand;
+        TabStop = true;
+    }
+
+    public event EventHandler? ShortcutCaptured;
+    public event Action<string>? CaptureRejected;
+
+    protected override void OnClick(EventArgs args)
+    {
+        base.OnClick(args);
+        Focus();
+        SelectAll();
+    }
+
+    protected override void OnKeyDown(KeyEventArgs args)
+    {
+        args.SuppressKeyPress = true;
+        args.Handled = true;
+        if (args.KeyCode is Keys.ControlKey or Keys.ShiftKey or Keys.Menu)
+        {
+            return;
+        }
+        try
+        {
+            Text = ShortcutBinding.FromKeyData(args.KeyData);
+            SelectAll();
+            ShortcutCaptured?.Invoke(this, EventArgs.Empty);
+        }
+        catch (ArgumentException)
+        {
+            CaptureRejected?.Invoke("Choose a key with Alt, Ctrl, or Shift.");
+        }
+    }
+}

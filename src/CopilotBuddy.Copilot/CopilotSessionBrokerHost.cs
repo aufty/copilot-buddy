@@ -8,7 +8,7 @@ public static class CopilotSessionBrokerHost
 {
     public static async Task RunAsync(CancellationToken cancellationToken = default)
     {
-        using Mutex instance = new(true, "Local\\CopilotBuddy.AssistantBroker.v9", out bool firstInstance);
+        using Mutex instance = new(true, "Local\\CopilotBuddy.AssistantBroker.v11", out bool firstInstance);
         if (!firstInstance)
         {
             return;
@@ -153,6 +153,8 @@ public static class CopilotSessionBrokerHost
                     AssistantBrokerProtocol.OpenHandoff => await OpenHandoffAsync(
                         Deserialize<AssistantHandoff>(request), cancellationToken),
                     AssistantBrokerProtocol.StoreSession => await StoreSessionAsync(
+                        Deserialize<AssistantStoreRequest>(request), cancellationToken),
+                    AssistantBrokerProtocol.CloseStoredSessionSource => await CloseStoredSessionSourceAsync(
                         Deserialize<AssistantSessionTarget>(request), cancellationToken),
                     AssistantBrokerProtocol.OpenStoredSession => await OpenStoredSessionAsync(
                         Deserialize<AssistantStoredSession>(request), cancellationToken),
@@ -209,11 +211,11 @@ public static class CopilotSessionBrokerHost
         }
 
         private async Task<AssistantStoredSession?> StoreSessionAsync(
-            AssistantSessionTarget target,
+            AssistantStoreRequest request,
             CancellationToken cancellationToken)
         {
             AssistantStoredSession? storedSession =
-                await sessions.StoreSessionAsync(target, cancellationToken);
+                await sessions.StoreSessionAsync(request, cancellationToken);
             if (storedSession is null)
             {
                 return null;
@@ -236,8 +238,15 @@ public static class CopilotSessionBrokerHost
             {
                 Broadcast(AssistantBrokerProtocol.StoredSessionAdded, storedSession);
             }
-            await sessions.CloseSessionSourceAsync(target, cancellationToken);
             return storedSession;
+        }
+
+        private async Task<bool> CloseStoredSessionSourceAsync(
+            AssistantSessionTarget target,
+            CancellationToken cancellationToken)
+        {
+            await sessions.CloseSessionSourceAsync(target, cancellationToken);
+            return true;
         }
 
         private async Task<bool> OpenStoredSessionAsync(

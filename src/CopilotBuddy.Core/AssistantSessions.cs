@@ -80,6 +80,10 @@ public sealed record AssistantStoredSession(
     string Label,
     string WorkingDirectory);
 
+public sealed record AssistantStoreRequest(
+    AssistantSessionTarget Target,
+    string Label);
+
 public interface IAssistantSessions : IAsyncDisposable
 {
     event EventHandler<SessionAttention>? AttentionRequested;
@@ -111,6 +115,9 @@ public interface IStoredAssistantSessions : IAssistantSessions
     event EventHandler<AssistantStoredSession>? StoredSessionAdded;
     event EventHandler<string>? StoredSessionRemoved;
     Task<AssistantStoredSession?> StoreSessionAsync(
+        AssistantStoreRequest request,
+        CancellationToken cancellationToken);
+    Task CloseStoredSessionSourceAsync(
         AssistantSessionTarget target,
         CancellationToken cancellationToken);
     Task OpenStoredSessionAsync(

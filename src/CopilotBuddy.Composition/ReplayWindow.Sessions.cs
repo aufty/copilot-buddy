@@ -16,7 +16,6 @@ internal sealed partial class ReplayWindow
     private const int StoreHotkeyId = 0x4245;
     private const int InquireHotkeyId = 0x4246;
     private const int GatherHotkeyId = 0x4247;
-    private const int TestHotkeyId = 0x42FF;
     private readonly IStoredAssistantSessions assistantSessions;
     private readonly SessionSettings sessionSettings;
     private readonly AttentionQueue attentionQueue = new();
@@ -47,12 +46,7 @@ internal sealed partial class ReplayWindow
     private bool gatheringWindows;
     private bool storingSession;
     private bool injectingInquire;
-    private bool hotkeyRegistered;
-    private bool skillMenuHotkeyRegistered;
-    private bool handoffHotkeyRegistered;
-    private bool storeHotkeyRegistered;
-    private bool inquireHotkeyRegistered;
-    private bool gatherHotkeyRegistered;
+    private readonly HashSet<int> registeredHotkeys = [];
     private SparkleBorderWindow? sparkleBorder;
     private bool sessionsStopping;
     private ToolStripMenuItem? shortcutMenu;
@@ -70,7 +64,7 @@ internal sealed partial class ReplayWindow
         skillMenu.VisibleChanged += (_, _) => UpdatePointerRouting();
 
         exitMenu.Items.Add("Summon", null, async (_, _) => await SummonAsync());
-        shortcutMenu = new ToolStripMenuItem($"Summon shortcut: {sessionSettings.Shortcut}", null, (_, _) => EditShortcut());
+        shortcutMenu = new ToolStripMenuItem("Settings...", null, async (_, _) => await EditSettingsAsync());
         exitMenu.Items.Add(shortcutMenu);
         exitMenu.Items.Add(new ToolStripSeparator());
     }
@@ -101,19 +95,11 @@ internal sealed partial class ReplayWindow
         assistantSessions.ConnectionFailed += OnConnectionFailed;
         try
         {
-            RegisterShortcut(sessionSettings.Shortcut);
+            RegisterShortcuts(sessionSettings.Shortcuts);
         }
         catch (Exception exception) when (exception is ArgumentException or Win32Exception)
         {
             BeginInvoke(() => ShowSessionError($"Shortcut unavailable: {exception.Message}"));
-        }
-        try
-        {
-            RegisterSkillHotkeys();
-        }
-        catch (Win32Exception exception)
-        {
-            BeginInvoke(() => ShowSessionError($"Skill shortcut unavailable: {exception.Message}"));
         }
         if (Environment.GetCommandLineArgs().Contains("--open-copilot", StringComparer.OrdinalIgnoreCase))
         {
@@ -121,53 +107,50 @@ internal sealed partial class ReplayWindow
         }
     }
 
-    private void RegisterSkillHotkeys()
+    private void RegisterShortcuts(SessionShortcutSettings shortcuts)
     {
-        if (!RegisterHotKey(Handle, SkillMenuHotkeyId, 0x4001, (uint)Keys.Space))
+        (int Identifier, string Name, string Shortcut)[] bindings =
+        [
+            (OpenSessionHotkeyId, "Summon", shortcuts.Summon),
+            (SkillMenuHotkeyId, "Buddy Menu", shortcuts.SkillMenu),
+            (InquireHotkeyId, "Inquire", shortcuts.Inquire),
+            (HandoffHotkeyId, "Handoff", shortcuts.Handoff),
+            (GatherHotkeyId, "Gather", shortcuts.Gather),
+            (StoreHotkeyId, "Store", shortcuts.Store)
+        ];
+        Dictionary<ShortcutBinding, string> used = [];
+        try
         {
-            throw new Win32Exception(Marshal.GetLastWin32Error(), "Alt+Space is unavailable for the skills menu.");
+            foreach ((int identifier, string name, string shortcut) in bindings)
+            {
+                ShortcutBinding binding = ShortcutBinding.Parse(shortcut);
+                if (used.TryGetValue(binding, out string? existing))
+                {
+                    throw new ArgumentException($"{name} and {existing} use the same shortcut.");
+                }
+                used.Add(binding, name);
+                if (!RegisterHotKey(Handle, identifier, binding.Modifiers, (uint)binding.Key))
+                {
+                    throw new Win32Exception(
+                        Marshal.GetLastWin32Error(), $"{shortcut} is unavailable for {name}.");
+                }
+                registeredHotkeys.Add(identifier);
+            }
         }
-        skillMenuHotkeyRegistered = true;
-        if (!RegisterHotKey(Handle, HandoffHotkeyId, 0x4005, (uint)Keys.H))
+        catch
         {
-            UnregisterHotKey(Handle, SkillMenuHotkeyId);
-            skillMenuHotkeyRegistered = false;
-            throw new Win32Exception(Marshal.GetLastWin32Error(), "Alt+Shift+H is unavailable for Handoff.");
+            UnregisterShortcuts();
+            throw;
         }
-        handoffHotkeyRegistered = true;
-        if (!RegisterHotKey(Handle, StoreHotkeyId, 0x4005, (uint)Keys.S))
+    }
+
+    private void UnregisterShortcuts()
+    {
+        foreach (int identifier in registeredHotkeys)
         {
-            UnregisterHotKey(Handle, HandoffHotkeyId);
-            UnregisterHotKey(Handle, SkillMenuHotkeyId);
-            handoffHotkeyRegistered = false;
-            skillMenuHotkeyRegistered = false;
-            throw new Win32Exception(Marshal.GetLastWin32Error(), "Alt+Shift+S is unavailable for Store.");
+            UnregisterHotKey(Handle, identifier);
         }
-        storeHotkeyRegistered = true;
-        if (!RegisterHotKey(Handle, InquireHotkeyId, 0x4005, (uint)Keys.G))
-        {
-            UnregisterHotKey(Handle, StoreHotkeyId);
-            UnregisterHotKey(Handle, HandoffHotkeyId);
-            UnregisterHotKey(Handle, SkillMenuHotkeyId);
-            storeHotkeyRegistered = false;
-            handoffHotkeyRegistered = false;
-            skillMenuHotkeyRegistered = false;
-            throw new Win32Exception(Marshal.GetLastWin32Error(), "Alt+Shift+G is unavailable for Inquire.");
-        }
-        inquireHotkeyRegistered = true;
-        if (!RegisterHotKey(Handle, GatherHotkeyId, 0x4005, (uint)Keys.T))
-        {
-            UnregisterHotKey(Handle, InquireHotkeyId);
-            UnregisterHotKey(Handle, StoreHotkeyId);
-            UnregisterHotKey(Handle, HandoffHotkeyId);
-            UnregisterHotKey(Handle, SkillMenuHotkeyId);
-            inquireHotkeyRegistered = false;
-            storeHotkeyRegistered = false;
-            handoffHotkeyRegistered = false;
-            skillMenuHotkeyRegistered = false;
-            throw new Win32Exception(Marshal.GetLastWin32Error(), "Alt+Shift+T is unavailable for Gather.");
-        }
-        gatherHotkeyRegistered = true;
+        registeredHotkeys.Clear();
     }
 
     private void ShowSkillMenu()
@@ -192,7 +175,7 @@ internal sealed partial class ReplayWindow
         skillMenu.Present(this,
             new Point(Math.Clamp(x, area.Left, Math.Max(area.Left, area.Right - menuSize.Width)), y),
             dpiScale,
-            sessionSettings.Shortcut);
+            sessionSettings.Shortcuts);
     }
 
     private async Task InjectInquireAsync()
@@ -369,25 +352,74 @@ internal sealed partial class ReplayWindow
         {
             return;
         }
-        storingSession = true;
-        skillMenu.Hide();
+        AssistantSessionTarget? target;
         try
         {
-            using CancellationTokenSource timeout =
+            using CancellationTokenSource captureTimeout =
                 CancellationTokenSource.CreateLinkedTokenSource(sessionCancellation.Token);
-            timeout.CancelAfter(TimeSpan.FromSeconds(10));
-            AssistantSessionTarget? target =
-                await assistantSessions.CaptureSessionTargetAsync(timeout.Token);
-            if (target is null)
+            captureTimeout.CancelAfter(TimeSpan.FromSeconds(5));
+            target = await assistantSessions.CaptureSessionTargetAsync(captureTimeout.Token);
+        }
+        catch (OperationCanceledException) when (sessionCancellation.IsCancellationRequested)
+        {
+            return;
+        }
+        catch (Exception exception)
+        {
+            skillMenu.Hide();
+            ShowSessionError($"Could not identify the session to store: {exception.Message}");
+            return;
+        }
+        skillMenu.Hide();
+        if (target is null)
+        {
+            ShowSessionError("Focus a Copilot CLI session opened by the buddy before using Store.");
+            return;
+        }
+        storingSession = true;
+        try
+        {
+            if (target.WindowBounds is { Width: > 0, Height: > 0 } windowBounds)
             {
-                ShowSessionError("Focus a Copilot CLI session opened by the buddy before using Store.");
+                _ = BeginHandoffWindowVisit(windowBounds);
+            }
+            string? label;
+            try
+            {
+                label = StoredSessionNameDialog.Ask(this, dpiScale, target.WindowBounds);
+            }
+            finally
+            {
+                _ = EndHandoffWindowVisit();
+            }
+            if (label is null)
+            {
                 return;
             }
+            using CancellationTokenSource timeout =
+                CancellationTokenSource.CreateLinkedTokenSource(sessionCancellation.Token);
+            timeout.CancelAfter(TimeSpan.FromSeconds(25));
             AssistantStoredSession? storedSession =
-                await assistantSessions.StoreSessionAsync(target, timeout.Token);
+                await assistantSessions.StoreSessionAsync(new(target, label), timeout.Token);
             if (storedSession is null)
             {
                 ShowSessionError("The highlighted Copilot session could not be stored.");
+                return;
+            }
+            try
+            {
+                using CancellationTokenSource closeTimeout =
+                    CancellationTokenSource.CreateLinkedTokenSource(sessionCancellation.Token);
+                closeTimeout.CancelAfter(TimeSpan.FromSeconds(10));
+                await assistantSessions.CloseStoredSessionSourceAsync(target, closeTimeout.Token);
+            }
+            catch (OperationCanceledException) when (sessionCancellation.IsCancellationRequested)
+            {
+            }
+            catch (Exception exception)
+            {
+                ShowSessionError(
+                    $"The session was stored as \"{storedSession.Label}\", but its terminal could not close: {exception.Message}");
             }
         }
         catch (OperationCanceledException) when (sessionCancellation.IsCancellationRequested) { }
@@ -1043,82 +1075,6 @@ internal sealed partial class ReplayWindow
         }
     }
 
-    private void RegisterShortcut(string shortcut)
-    {
-        Keys keys = (Keys)(new KeysConverter().ConvertFromInvariantString(shortcut)
-            ?? throw new ArgumentException("Choose a modifier and a key."));
-        Keys key = keys & Keys.KeyCode;
-        uint modifiers = 0x4000;
-        if ((keys & Keys.Alt) != 0) modifiers |= 0x1;
-        if ((keys & Keys.Control) != 0) modifiers |= 0x2;
-        if ((keys & Keys.Shift) != 0) modifiers |= 0x4;
-        if (modifiers == 0x4000 || key is Keys.None or Keys.ControlKey or Keys.ShiftKey or Keys.Menu)
-        {
-            throw new ArgumentException("Choose a key with Alt, Ctrl, or Shift.");
-        }
-        if (!RegisterHotKey(Handle, TestHotkeyId, modifiers, (uint)key))
-        {
-            throw new Win32Exception(Marshal.GetLastWin32Error());
-        }
-        UnregisterHotKey(Handle, TestHotkeyId);
-        if (hotkeyRegistered) UnregisterHotKey(Handle, OpenSessionHotkeyId);
-        if (!RegisterHotKey(Handle, OpenSessionHotkeyId, modifiers, (uint)key))
-        {
-            hotkeyRegistered = false;
-            throw new Win32Exception(Marshal.GetLastWin32Error());
-        }
-        hotkeyRegistered = true;
-    }
-
-    private void EditShortcut()
-    {
-        using Form dialog = new()
-        {
-            Text = "Summon shortcut", FormBorderStyle = FormBorderStyle.FixedDialog,
-            StartPosition = FormStartPosition.CenterScreen, ClientSize = new Size(330, 115),
-            MinimizeBox = false, MaximizeBox = false, ShowInTaskbar = false
-        };
-        TextBox input = new() { ReadOnly = true, Text = sessionSettings.Shortcut, Bounds = new Rectangle(16, 16, 298, 28) };
-        Button save = new() { Text = "Save", Bounds = new Rectangle(150, 65, 78, 30) };
-        Button cancel = new() { Text = "Cancel", Bounds = new Rectangle(236, 65, 78, 30), DialogResult = DialogResult.Cancel };
-        input.KeyDown += (_, args) =>
-        {
-            args.SuppressKeyPress = true;
-            if (args.KeyCode is not (Keys.ControlKey or Keys.ShiftKey or Keys.Menu))
-            {
-                input.Text = new KeysConverter().ConvertToInvariantString(args.KeyData);
-            }
-        };
-        save.Click += (_, _) =>
-        {
-            try
-            {
-                RegisterShortcut(input.Text);
-                sessionSettings.Shortcut = input.Text;
-                sessionSettings.Save();
-                shortcutMenu!.Text = $"Summon shortcut: {input.Text}";
-                dialog.Close();
-            }
-            catch (Exception exception) when (exception is ArgumentException or Win32Exception or IOException or UnauthorizedAccessException)
-            {
-                MessageBox.Show(dialog, exception.Message, "Shortcut unavailable", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-            }
-        };
-        dialog.Controls.AddRange([input, save, cancel]);
-        dialog.CancelButton = cancel;
-        if (hotkeyRegistered)
-        {
-            UnregisterHotKey(Handle, OpenSessionHotkeyId);
-            hotkeyRegistered = false;
-        }
-        dialog.ShowDialog(this);
-        if (!hotkeyRegistered)
-        {
-            try { RegisterShortcut(sessionSettings.Shortcut); }
-            catch (Win32Exception exception) { ShowSessionError(exception.Message); }
-        }
-    }
-
     private async Task EditSettingsAsync()
     {
         if (SkillsBlocked)
@@ -1128,18 +1084,40 @@ internal sealed partial class ReplayWindow
         skillMenu.Hide();
         AssistantLaunchCommand previousLaunch = sessionSettings.EffectiveCopilotLaunch;
         string previousBuddy = BuddySpriteCatalog.Resolve(sessionSettings.Buddy).Name;
+        SessionShortcutSettings previousShortcuts = sessionSettings.Shortcuts;
         SettingsDialogResult? updated;
+        UnregisterShortcuts();
         try
         {
-            updated = CopilotSettingsDialog.Edit(this, dpiScale, previousLaunch, previousBuddy);
+            updated = CopilotSettingsDialog.Edit(
+                this,
+                dpiScale,
+                previousLaunch,
+                previousBuddy,
+                previousShortcuts,
+                shortcuts =>
+                {
+                    UnregisterShortcuts();
+                    try
+                    {
+                        RegisterShortcuts(shortcuts);
+                        return null;
+                    }
+                    catch (Exception exception) when (exception is ArgumentException or Win32Exception)
+                    {
+                        return exception.Message;
+                    }
+                });
         }
         catch (InvalidOperationException exception)
         {
+            RegisterShortcuts(previousShortcuts);
             ShowSessionError(exception.Message);
             return;
         }
         if (updated is null)
         {
+            RegisterShortcuts(previousShortcuts);
             return;
         }
         bool launchChanged =
@@ -1147,6 +1125,8 @@ internal sealed partial class ReplayWindow
             !updated.CopilotLaunch.Arguments.SequenceEqual(previousLaunch.Arguments, StringComparer.Ordinal);
         if (launchChanged && assistantSessions is not IConfigurableAssistantSessions)
         {
+            UnregisterShortcuts();
+            RegisterShortcuts(previousShortcuts);
             ShowSessionError("This assistant provider does not support launch settings.");
             return;
         }
@@ -1164,6 +1144,7 @@ internal sealed partial class ReplayWindow
             sessionSettings.CopilotLaunch = updated.CopilotLaunch;
             sessionSettings.CliPath = null;
             sessionSettings.Buddy = updated.Buddy;
+            sessionSettings.Shortcuts = updated.Shortcuts;
             sessionSettings.Save();
             if (!string.Equals(updated.Buddy, previousBuddy, StringComparison.OrdinalIgnoreCase))
             {
@@ -1189,6 +1170,24 @@ internal sealed partial class ReplayWindow
             }
             sessionSettings.CopilotLaunch = previousLaunch;
             sessionSettings.Buddy = previousBuddy;
+            sessionSettings.Shortcuts = previousShortcuts;
+            try
+            {
+                sessionSettings.Save();
+            }
+            catch (Exception rollbackException) when (rollbackException is IOException or UnauthorizedAccessException)
+            {
+                System.Diagnostics.Debug.WriteLine(rollbackException);
+            }
+            UnregisterShortcuts();
+            try
+            {
+                RegisterShortcuts(previousShortcuts);
+            }
+            catch (Exception rollbackException) when (rollbackException is ArgumentException or Win32Exception)
+            {
+                System.Diagnostics.Debug.WriteLine(rollbackException);
+            }
             ShowSessionError($"Could not save settings: {exception.Message}");
         }
     }
@@ -1312,12 +1311,7 @@ internal sealed partial class ReplayWindow
         sessionsStopping = true;
         deferredHandoffPresent = null;
         StopSessionLaunchJump();
-        if (hotkeyRegistered) UnregisterHotKey(Handle, OpenSessionHotkeyId);
-        if (skillMenuHotkeyRegistered) UnregisterHotKey(Handle, SkillMenuHotkeyId);
-        if (handoffHotkeyRegistered) UnregisterHotKey(Handle, HandoffHotkeyId);
-        if (storeHotkeyRegistered) UnregisterHotKey(Handle, StoreHotkeyId);
-        if (inquireHotkeyRegistered) UnregisterHotKey(Handle, InquireHotkeyId);
-        if (gatherHotkeyRegistered) UnregisterHotKey(Handle, GatherHotkeyId);
+        UnregisterShortcuts();
         sessionCancellation.Cancel();
         assistantSessions.AttentionRequested -= OnSessionAttention;
         assistantSessions.ContextUsageChanged -= OnContextUsageChanged;
@@ -1356,6 +1350,11 @@ internal sealed partial class ReplayWindow
 internal sealed class SessionSettings
 {
     public string Shortcut { get; set; } = "Alt+Enter";
+    public string SkillMenuShortcut { get; set; } = "Alt+Space";
+    public string InquireShortcut { get; set; } = "Alt+Shift+G";
+    public string HandoffShortcut { get; set; } = "Alt+Shift+H";
+    public string GatherShortcut { get; set; } = "Alt+Shift+T";
+    public string StoreShortcut { get; set; } = "Alt+Shift+S";
     public string Buddy { get; set; } = BuddySpriteCatalog.DefaultName;
     public string? WorkingDirectory { get; set; }
     public AssistantLaunchCommand? CopilotLaunch { get; set; }
@@ -1367,6 +1366,26 @@ internal sealed class SessionSettings
         (!string.IsNullOrWhiteSpace(CliPath)
             ? new AssistantLaunchCommand(CliPath, [])
             : AssistantLaunchCommand.Default);
+    [JsonIgnore]
+    public SessionShortcutSettings Shortcuts
+    {
+        get => new(
+            Shortcut,
+            SkillMenuShortcut,
+            InquireShortcut,
+            HandoffShortcut,
+            GatherShortcut,
+            StoreShortcut);
+        set
+        {
+            Shortcut = value.Summon;
+            SkillMenuShortcut = value.SkillMenu;
+            InquireShortcut = value.Inquire;
+            HandoffShortcut = value.Handoff;
+            GatherShortcut = value.Gather;
+            StoreShortcut = value.Store;
+        }
+    }
     private static string SettingsPath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "CopilotBuddy", "settings.json");
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web) { WriteIndented = true };
 

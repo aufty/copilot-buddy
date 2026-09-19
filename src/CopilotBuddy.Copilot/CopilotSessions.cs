@@ -695,25 +695,42 @@ public sealed class CopilotSessions : IAssistantSessions
             cancellationToken);
     }
 
-    public Task<AssistantStoredSession?> StoreSessionAsync(
-        AssistantSessionTarget target,
+    public async Task<AssistantStoredSession?> StoreSessionAsync(
+        AssistantStoreRequest request,
         CancellationToken cancellationToken)
     {
-        ArgumentNullException.ThrowIfNull(target);
+        ArgumentNullException.ThrowIfNull(request);
+        string label = request.Label.Trim();
+        ArgumentException.ThrowIfNullOrWhiteSpace(label);
+        if (label.Length > 80 || label.IndexOfAny(['\r', '\n']) >= 0)
+        {
+            throw new ArgumentException("Stored session names must be one line and at most 80 characters.");
+        }
         cancellationToken.ThrowIfCancellationRequested();
-        string[] parts = target.SessionId.Split('/', 2);
+        string[] parts = request.Target.SessionId.Split('/', 2);
         if (parts.Length != 2 ||
             !terminals.TryGetValue(parts[0], out TerminalSession? terminal) ||
             terminal.Process.HasExited ||
             !terminal.Sessions.TryGetValue(parts[1], out SessionActivity? activity) ||
             activity.Session is null)
         {
-            return Task.FromResult<AssistantStoredSession?>(null);
+            return null;
         }
-        return Task.FromResult<AssistantStoredSession?>(new(
-            parts[1],
-            activity.Title,
-            terminal.WorkingDirectory));
+        await activity.Session.Rpc.Name.SetAsync(label, cancellationToken);
+        DateTime deadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
+        string? confirmed = null;
+        while (DateTime.UtcNow < deadline)
+        {
+            confirmed = (await activity.Session.Rpc.Name.GetAsync(cancellationToken)).Name;
+            if (string.Equals(confirmed, label, StringComparison.Ordinal))
+            {
+                activity.Title = label;
+                return new AssistantStoredSession(parts[1], label, terminal.WorkingDirectory);
+            }
+            await Task.Delay(100, cancellationToken);
+        }
+        throw new InvalidOperationException(
+            $"Copilot did not confirm the session name \"{label}\" before the timeout.");
     }
 
     public async Task OpenStoredSessionAsync(

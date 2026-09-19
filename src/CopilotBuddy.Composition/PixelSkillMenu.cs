@@ -28,7 +28,7 @@ internal sealed class PixelSkillMenu : Form
     private SupplyKind? supplyHovered;
     private readonly HashSet<SupplyKind> deployedSupplies = [];
     private readonly HashSet<SupplyKind> pendingRecalls = [];
-    private string summonShortcut = "Alt+Enter";
+    private SessionShortcutSettings shortcuts = SessionShortcutSettings.Default;
     private bool waitForMouseRelease;
     private MouseButtons previousButtons;
 
@@ -42,7 +42,7 @@ internal sealed class PixelSkillMenu : Form
         BackColor = Color.FromArgb(31, 29, 38);
         DoubleBuffered = true;
         ClientSize = new Size(560, 454);
-        AccessibleName = "Copilot Buddy special skills";
+        AccessibleName = "Copilot Buddy menu";
         dismissTimer.Tick += (_, _) => DismissOnOutsideClick();
     }
 
@@ -75,10 +75,10 @@ internal sealed class PixelSkillMenu : Form
         }
     }
 
-    public void Present(Form owner, Point location, float dpiScale, string shortcut)
+    public void Present(Form owner, Point location, float dpiScale, SessionShortcutSettings shortcuts)
     {
         float scale = Math.Max(1, dpiScale);
-        summonShortcut = shortcut;
+        this.shortcuts = shortcuts;
         headingFont?.Dispose();
         itemFont?.Dispose();
         shortcutFont?.Dispose();
@@ -134,7 +134,7 @@ internal sealed class PixelSkillMenu : Form
 
         Rectangle headingBounds = new((int)(14 * scale), (int)(12 * scale),
             ClientSize.Width - (int)(28 * scale), (int)(38 * scale));
-        TextRenderer.DrawText(args.Graphics, "SPECIAL SKILLS", headingFont, headingBounds,
+        TextRenderer.DrawText(args.Graphics, "BUDDY MENU", headingFont, headingBounds,
             Color.FromArgb(91, 216, 211), TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
 
         using Pen divider = new(Color.FromArgb(63, 83, 96), Math.Max(1, 2 * scale));
@@ -149,11 +149,11 @@ internal sealed class PixelSkillMenu : Form
         args.Graphics.DrawLine(divider, (int)(359 * scale), (int)(12 * scale),
             (int)(359 * scale), ClientSize.Height - (int)(13 * scale));
 
-        DrawItem(args.Graphics, summonBounds, summonHovered, "Summon", summonShortcut, scale);
-        DrawItem(args.Graphics, inquireBounds, inquireHovered, "Inquire", "Alt+Shift+G", scale);
-        DrawItem(args.Graphics, handoffBounds, handoffHovered, "Handoff", "Alt+Shift+H", scale);
-        DrawItem(args.Graphics, gatherBounds, gatherHovered, "Gather", "Alt+Shift+T", scale);
-        DrawItem(args.Graphics, storeBounds, storeHovered, "Store", "Alt+Shift+S", scale);
+        DrawItem(args.Graphics, summonBounds, summonHovered, "Summon", shortcuts.Summon, scale);
+        DrawItem(args.Graphics, inquireBounds, inquireHovered, "Inquire", shortcuts.Inquire, scale);
+        DrawItem(args.Graphics, handoffBounds, handoffHovered, "Handoff", shortcuts.Handoff, scale);
+        DrawItem(args.Graphics, gatherBounds, gatherHovered, "Gather", shortcuts.Gather, scale);
+        DrawItem(args.Graphics, storeBounds, storeHovered, "Store", shortcuts.Store, scale);
         DrawSupply(args.Graphics, ballBounds, supplyHovered == SupplyKind.Ball, SupplyKind.Ball, "BALL", scale);
         DrawSupply(args.Graphics, foodBounds, supplyHovered == SupplyKind.Food, SupplyKind.Food, "FOOD", scale);
         DrawSupply(args.Graphics, waterBounds, supplyHovered == SupplyKind.Water, SupplyKind.Water, "WATER", scale);

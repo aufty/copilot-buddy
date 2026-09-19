@@ -9,8 +9,8 @@ namespace CopilotBuddy.Core;
 
 public static class AssistantBrokerProtocol
 {
-    public const int Version = 9;
-    public const string PipeName = "CopilotBuddy.AssistantBroker.v9";
+    public const int Version = 11;
+    public const string PipeName = "CopilotBuddy.AssistantBroker.v11";
     public const string Request = "request";
     public const string Response = "response";
     public const string Event = "event";
@@ -24,6 +24,7 @@ public static class AssistantBrokerProtocol
     public const string CloseHandoffSource = "close-handoff-source";
     public const string OpenHandoff = "open-handoff";
     public const string StoreSession = "store-session";
+    public const string CloseStoredSessionSource = "close-stored-session-source";
     public const string OpenStoredSession = "open-stored-session";
     public const string AttentionRequested = "attention-requested";
     public const string ContextUsageChanged = "context-usage-changed";
@@ -415,10 +416,16 @@ public sealed class AssistantSessionBrokerClient : IStoredAssistantSessions, ICo
             AssistantBrokerProtocol.OpenHandoff, handoff, cancellationToken);
 
     public Task<AssistantStoredSession?> StoreSessionAsync(
+        AssistantStoreRequest request,
+        CancellationToken cancellationToken) =>
+        RequestAsync<AssistantStoreRequest, AssistantStoredSession?>(
+            AssistantBrokerProtocol.StoreSession, request, cancellationToken);
+
+    public async Task CloseStoredSessionSourceAsync(
         AssistantSessionTarget target,
         CancellationToken cancellationToken) =>
-        RequestAsync<AssistantSessionTarget, AssistantStoredSession?>(
-            AssistantBrokerProtocol.StoreSession, target, cancellationToken);
+        await RequestAsync<AssistantSessionTarget, bool>(
+            AssistantBrokerProtocol.CloseStoredSessionSource, target, cancellationToken);
 
     public async Task OpenStoredSessionAsync(
         AssistantStoredSession storedSession,

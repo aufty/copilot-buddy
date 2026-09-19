@@ -37,15 +37,65 @@ dotnet run --project src/CopilotBuddy.Cli -- visible on
 
 The built CLI is named `copilot-buddyctl.exe`. Messages pause wandering and display a bounded, wrapped speech bubble while the buddy waves and hops. Long messages are truncated with an ellipsis. Reduced-motion mode disables hops and uses slower waving. Commands received while dragging or flying update the bubble immediately; attention animation resumes after landing.
 
+## Releases
+
+Version tags matching `v*` trigger `.github/workflows/release.yml`. The workflow tests the core project, publishes a self-contained `win-x64` single-file application, creates its SHA-256 checksum, and attaches both files to a GitHub Release:
+
+- `CopilotBuddy-win-x64.exe`
+- `CopilotBuddy-win-x64.exe.sha256`
+
+Create a release by pushing a semantic-version tag:
+
+```powershell
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+The executable includes the .NET runtime, fonts, sprites, and presentation configuration. Users do not need the .NET SDK or runtime, but they do need Windows 11 and the GitHub Copilot CLI prerequisite described below. The executable is currently unsigned, so Windows Defender SmartScreen may require **More info** followed by **Run anyway**. Organization policy can prevent unsigned applications from running.
+
+Release assets are immutable inputs to package managers. Never replace an uploaded executable for an existing version; publish a new version instead.
+
+### WinGet
+
+After the first public GitHub Release is available, install Microsoft's manifest creator:
+
+```powershell
+winget install --id Microsoft.WingetCreate --exact
+```
+
+Create the initial portable-package manifest from the versioned release URL:
+
+```powershell
+wingetcreate new https://github.com/aufty/copilot-buddy/releases/download/v0.1.0/CopilotBuddy-win-x64.exe
+```
+
+Use `Aufty.CopilotBuddy` as the package identifier, `portable` as the installer type, `x64` as the architecture, `user` as the scope, `10.0.22000.0` as the minimum OS version, and `copilot-buddy` as the command alias. Let WinGetCreate calculate the SHA-256 hash, validate the manifests, and submit the pull request to `microsoft/winget-pkgs`.
+
+For each later GitHub Release, submit a WinGet update:
+
+```powershell
+wingetcreate update Aufty.CopilotBuddy `
+  --version 0.2.0 `
+  --urls https://github.com/aufty/copilot-buddy/releases/download/v0.2.0/CopilotBuddy-win-x64.exe `
+  --submit
+```
+
+After the corresponding WinGet pull request is merged, users can install or update with:
+
+```powershell
+winget install --id Aufty.CopilotBuddy --exact
+winget upgrade --id Aufty.CopilotBuddy --exact
+```
+
 Hovering pauses wandering and switches to the standing breathing pose; leaving starts a fresh idle interval. A left click toggles a demo message. Click and hold to drag with spring-like cursor play; release while moving to fling the buddy, which falls back to the taskbar and squishes on impact. Moving at least three DIP suppresses the click action. A right click on the buddy, bubble, or tray icon opens Show demo, Dismiss, Copilot Buddy visible, and Exit commands alongside the rendering options. Only opaque sprite pixels and visible bubble/menu content receive pointer input.
 
 `visible off` hides both buddy and bubble, cancels active dragging/flight, and leaves the pipe and tray icon available. `visible on` restores the buddy and any retained message. The pipe is restricted to the current Windows user and retains protocol version 1, request validation, and structured success/error responses.
 
 ## Copilot Sessions
 
-With the buddy running, **Alt+Enter** summons the oldest queued Copilot CLI session when one needs attention, focusing its window and dismissing its alert just like clicking the message popup. With no pending session action, it opens Copilot CLI using the Windows default terminal application in the buddy's working directory. The buddy briefly sparkles when the terminal launches. **Summon** is also available in the pixel skills menu and tray menu; the tray's **Summon shortcut** command lets you press a replacement key combination to save it. If another application owns the shortcut, the buddy reports the conflict and the menu remains available. Terminal window/tab placement follows your terminal settings; automatic terminal-tab selection is not supported. Under Windows Terminal, Copilot Buddy associates the foreground terminal window with the most recently opened or explicitly focused managed session because the child `copilot.exe` process does not own the top-level terminal window.
+With the buddy running, **Alt+Enter** summons the oldest queued Copilot CLI session when one needs attention, focusing its window and dismissing its alert just like clicking the message popup. With no pending session action, it opens Copilot CLI using the Windows default terminal application in the buddy's working directory. The buddy briefly sparkles when the terminal launches. **Summon** is also available in the Buddy Menu and tray menu. Every global shortcut can be changed from **Settings** by clicking its shortcut box and pressing a replacement chord with Alt, Ctrl, or Shift; **Confirm** applies the set, **Reset** restores the defaults, and **Cancel** keeps the current bindings. If another application owns a shortcut, the buddy reports the conflict without saving the changes. Terminal window/tab placement follows your terminal settings; automatic terminal-tab selection is not supported. Under Windows Terminal, Copilot Buddy associates the foreground terminal window with the most recently opened or explicitly focused managed session because the child `copilot.exe` process does not own the top-level terminal window.
 
-Press **Alt+Space** or right-click the buddy or its bubble to open the pixel skills menu beside the buddy. **Handoff** (**Alt+Shift+H**) captures the currently focused buddy-managed Copilot session before opening its question window, so the modal dialog cannot change the handoff target. It then asks whether the output should be a spec, research instructions, concrete implementation instructions with file and line details, or custom freeform instructions. The captured Copilot session writes a redacted handoff document to a specific unique path under the OS temporary directory.
+Press **Alt+Space** or right-click the buddy or its bubble to open the Buddy Menu beside the buddy. **Handoff** (**Alt+Shift+H**) captures the currently focused buddy-managed Copilot session before opening its question window, so the modal dialog cannot change the handoff target. It then asks whether the output should be a spec, research instructions, concrete implementation instructions with file and line details, or custom freeform instructions. The captured Copilot session writes a redacted handoff document to a specific unique path under the OS temporary directory.
 
 **Gather** (**Alt+Shift+T**) restores and tiles every distinct terminal window controlled by Copilot Buddy into equal cells across the primary screen's working area. Buddy then hops to each tiled window in turn before returning to the taskbar. Other skills are ignored until he lands. Windows Terminal tabs that share one top-level window are gathered as one window, and unrelated terminal windows are left untouched.
 
@@ -65,7 +115,7 @@ Actionable Copilot alerts always take priority over supplies. A carried item, fa
 
 Copilot Buddy plays the same triumphant jump used when opening a session as it drops a present near its current position. The present follows a light toss arc, lands, and makes one subtle finishing skip. Presents choose from fun preset colors, with an occasional animated rainbow treatment. When the source session reports that it is done and the file is available, Copilot Buddy gracefully closes the terminal window associated with that source session and the present displays a clickable "<session> handoff ready to open" bubble. It does not delete the session through the Copilot API. Clicking the present or bubble pops it open with a small bounce away from the click and launches a fresh Copilot session instructed to continue from that exact handoff file. The present rendering and file-readiness behavior are provider-neutral; the Copilot adapter owns session prompts, completion signals, window closure, and continuation launch.
 
-**Store** (**Alt+Shift+S**) captures the most recently highlighted buddy-managed Copilot session, saves its session ID, title, and working directory in `%LOCALAPPDATA%\CopilotBuddy\stored-sessions.json`, drops it into its own present, and then closes the associated terminal window. Hovering over a stored present shows which session it contains. Clicking the present pops it open, launches Copilot CLI with that saved session ID, and attaches Copilot Buddy to the resumed session normally. Multiple stored sessions can coexist, and the broker reloads and replays their presents after Copilot Buddy, broker, or Windows restarts. A stored record is removed only after the saved session resumes and SDK attachment succeeds.
+**Store** (**Alt+Shift+S**) captures the most recently highlighted buddy-managed Copilot session and asks what to name it in a dialog centered on that terminal. Copilot Buddy uses the attached SDK's persisted session-name API, which backs `/rename`, and reads the name back before saving the session ID, confirmed name, and working directory in `%LOCALAPPDATA%\CopilotBuddy\stored-sessions.json` and dropping the named present. Only after the broker confirms that storage succeeded does Buddy separately request closure of the associated terminal window. If the rename is not confirmed, the session remains open and no present is created; if only the close fails, the named present remains available and Buddy reports that specific close failure. Hovering over a stored present shows its chosen name. Clicking the present pops it open, launches Copilot CLI with that saved session ID, and attaches Copilot Buddy to the resumed session normally. Multiple stored sessions can coexist, and the broker reloads and replays their presents after Copilot Buddy, broker, or Windows restarts. A stored record is removed only after the saved session resumes and SDK attachment succeeds.
 
 Install GitHub Copilot CLI with `winget install --id GitHub.Copilot --exact` and complete its sign-in flow. This integration uses GitHub.Copilot.SDK 1.0.14 and currently pins the interactive runtime to CLI 1.0.86-2, which must already be extracted in the CLI's per-user package cache. The SDK runtime download is disabled because the actual interactive CLI is used. CLI authentication, directory trust, tool approvals, questions, and plan decisions remain in the terminal; the buddy does not approve requests or submit prompts.
 
@@ -90,6 +140,11 @@ Settings, including the selected buddy sprite, are saved to `%LOCALAPPDATA%\Copi
 ```json
 {
 	"shortcut": "Alt+Enter",
+	"skillMenuShortcut": "Alt+Space",
+	"inquireShortcut": "Alt+Shift+G",
+	"handoffShortcut": "Alt+Shift+H",
+	"gatherShortcut": "Alt+Shift+T",
+	"storeShortcut": "Alt+Shift+S",
 	"buddy": "sprout",
 	"workingDirectory": "C:\\source\\copilot-buddy",
 	"copilotLaunch": {
@@ -99,7 +154,7 @@ Settings, including the selected buddy sprite, are saved to `%LOCALAPPDATA%\Copi
 }
 ```
 
-Open the pixel skills menu and select the gear at its top-right edge to choose a buddy and edit the Copilot launch command. The friendly command line is stored as a structured executable and prefix-argument array; Copilot Buddy appends its required UI-server, port, and session arguments. For example, `custom-launcher copilot --custom-option` produces the configuration above. Use `copilot` for the normal launch behavior. `workingDirectory: null` uses the directory the buddy was started from. For a normal launch, the adapter checks `COPILOT_CLI_PATH`, PATH, and the per-user WinGet installation. The legacy `cliPath` setting remains readable and is migrated when launch settings are saved. No GitHub credentials are stored in these settings. SDK connections use loopback and a random per-window connection token passed through the child environment.
+Open the Buddy Menu and select the gear at its top-right edge to choose a buddy, edit every global shortcut, and edit the Copilot launch command. The friendly command line is stored as a structured executable and prefix-argument array; Copilot Buddy appends its required UI-server, port, and session arguments. For example, `custom-launcher copilot --custom-option` produces the configuration above. Use `copilot` for the normal launch behavior. `workingDirectory: null` uses the directory the buddy was started from. For a normal launch, the adapter checks `COPILOT_CLI_PATH`, PATH, and the per-user WinGet installation. The legacy `cliPath` setting remains readable and is migrated when launch settings are saved. No GitHub credentials are stored in these settings. SDK connections use loopback and a random per-window connection token passed through the child environment.
 
 This version observes only CLI windows launched by the buddy, including sessions created/switched inside those windows. It does not attach to arbitrary existing terminals. Exiting the visual Copilot Buddy unregisters its shortcuts and leaves both the broker and CLI windows running, allowing the next visual process to reconnect and recover pending alerts and current context state. If attachment fails, check the CLI's first-run prompts, close that window, and reopen it through the buddy. Hidden buddies retain pending alerts, which appear when made visible again. Replay/smoke modes do not register the shortcut or launch Copilot.
 

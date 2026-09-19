@@ -1,0 +1,88 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-2025
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v5
+
+      - name: Install .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          global-json-file: global.json
+
+      - name: Restore
+        run: dotnet restore .\CopilotBuddy.slnx --nologo
+
+      - name: Build
+        run: dotnet build .\src\CopilotBuddy.Composition\CopilotBuddy.Composition.csproj -c Release --no-restore --nologo
+
+      - name: Test
+        run: dotnet test .\tests\CopilotBuddy.Core.Tests\CopilotBuddy.Core.Tests.csproj -c Release --no-restore --nologo
+
+      - name: Publish portable executable
+        shell: pwsh
+        run: |
+          $version = '${{ github.ref_name }}' -replace '^v', ''
+          if ($version -notmatch '^\d+\.\d+\.\d+([-.][0-9A-Za-z.-]+)?$') {
+              throw "Release tag '${{ github.ref_name }}' does not contain a valid version."
+          }
+
+          dotnet publish `
+            .\src\CopilotBuddy.Composition\CopilotBuddy.Composition.csproj `
+            -c Release `
+            -r win-x64 `
+            --self-contained true `
+            --nologo `
+            -p:Version=$version `
+            -p:PublishSingleFile=true `
+            -p:IncludeNativeLibrariesForSelfExtract=true `
+            -p:IncludeAllContentForSelfExtract=true `
+            -p:DebugType=None `
+            -p:DebugSymbols=false `
+            -o .\artifacts\publish
+
+          $source = '.\artifacts\publish\CopilotBuddy.Composition.exe'
+          $target = '.\artifacts\CopilotBuddy-win-x64.exe'
+          if (-not (Test-Path $source)) {
+              throw "Published executable was not found at '$source'."
+          }
+
+          Move-Item $source $target
+          $hash = (Get-FileHash $target -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  CopilotBuddy-win-x64.exe" |
+            Set-Content .\artifacts\CopilotBuddy-win-x64.exe.sha256
+
+      - name: Create GitHub release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $arguments = @(
+              'release',
+              'create',
+              '${{ github.ref_name }}',
+              '.\artifacts\CopilotBuddy-win-x64.exe',
+              '.\artifacts\CopilotBuddy-win-x64.exe.sha256',
+              '--title',
+              'Copilot Buddy ${{ github.ref_name }}',
+              '--generate-notes',
+              '--verify-tag'
+          )
+          if ('${{ github.ref_name }}'.Contains('-')) {
+              $arguments += '--prerelease'
+          }
+          & gh @arguments
+          if ($LASTEXITCODE -ne 0) {
+              throw "GitHub release creation failed with exit code $LASTEXITCODE."
+          }
