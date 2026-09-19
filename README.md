@@ -69,7 +69,7 @@ Create the initial portable-package manifest from the versioned release URL:
 wingetcreate new https://github.com/aufty/copilot-buddy/releases/download/v0.1.0/CopilotBuddy-win-x64.exe
 ```
 
-Use `Aufty.CopilotBuddy` as the package identifier, `portable` as the installer type, `x64` as the architecture, `user` as the scope, `10.0.22000.0` as the minimum OS version, and `copilot-buddy` as the command alias. Let WinGetCreate calculate the SHA-256 hash, validate the manifests, and submit the pull request to `microsoft/winget-pkgs`.
+Use `Aufty.CopilotBuddy` as the package identifier, `portable` as the installer type, `x64` as the architecture, `10.0.22000.0` as the minimum OS version, and `copilot-buddy` as the command alias. Let WinGetCreate calculate the SHA-256 hash, validate the manifests, and submit the pull request to `microsoft/winget-pkgs`.
 
 For each later GitHub Release, submit a WinGet update:
 
