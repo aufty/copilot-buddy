@@ -12,7 +12,8 @@ new ones, hand work to a fresh session, store sessions as presents, gather
 managed terminal windows, and provide lightweight ambient feedback without
 taking control away from the terminal.
 
-> **Platform status:** Copilot Buddy currently supports Windows 11 on x64.
+> **Platform status:** Copilot Buddy currently supports Windows 11 on x64 and
+> ARM64.
 > Release executables are unsigned, and WinGet installation is planned but is
 > not available yet.
 
@@ -239,7 +240,7 @@ can already be installed through WinGet as shown in Quick Start.
 
 ## Current Limitations
 
-- Windows 11 x64 only.
+- Windows 11 on x64 or ARM64.
 - Release executables are unsigned.
 - WinGet installation for Copilot Buddy is not available yet.
 - Buddy manages only Copilot CLI sessions it launches or resumes.
