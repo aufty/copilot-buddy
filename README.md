@@ -25,8 +25,10 @@ taking control away from the terminal.
    winget install --id GitHub.Copilot --exact
    ```
 
-2. Download `CopilotBuddy-win-x64.exe` from the
-   [latest GitHub Release](https://github.com/aufty/copilot-buddy/releases/latest).
+2. Download the executable for your Windows system from the
+   [latest GitHub Release](https://github.com/aufty/copilot-buddy/releases/latest):
+   `CopilotBuddy-win-arm64.exe` for ARM64 devices or
+   `CopilotBuddy-win-x64.exe` for x64 devices.
 3. Run the downloaded executable.
 
 The release is self-contained, so the .NET SDK and runtime are not required.
@@ -41,8 +43,8 @@ the executable from this repository's GitHub Releases page, select
 **Run anyway**. Some organization policies block unsigned applications
 entirely.
 
-You can optionally verify the download against
-`CopilotBuddy-win-x64.exe.sha256`, which is attached to the same release.
+You can optionally verify the download against its matching `.sha256` file,
+which is attached to the same release.
 
 ### Option 2: Build and run locally
 
@@ -217,9 +219,13 @@ and publish:
 
 - `CopilotBuddy-win-x64.exe`
 - `CopilotBuddy-win-x64.exe.sha256`
+- `CopilotBuddy-win-arm64.exe`
+- `CopilotBuddy-win-arm64.exe.sha256`
 
-The executable is a self-contained, single-file Windows x64 build. Release
-assets are immutable; fixes are published as a new version rather than by
+Each executable is a self-contained, single-file native Windows build. Use the
+ARM64 asset on ARM64 devices and the x64 asset on x64 devices so Buddy's bundled
+Copilot runtime matches the installed Copilot CLI. Release assets are
+immutable; fixes are published as a new version rather than by
 replacing an existing executable.
 
 ### WinGet
