@@ -1,5 +1,7 @@
 # Copilot Buddy
 
+![Copilot Buddy walking along the Windows 11 taskbar](docs/images/copilot-buddy-on-windows-11-taskbar.png)
+
 Copilot Buddy turns GitHub Copilot CLI into a small Windows desktop companion.
 It wanders along the Windows 11 taskbar, watches the Copilot sessions it
 launches, and gets your attention when a session needs approval, has a
