@@ -583,7 +583,7 @@ internal sealed partial class ReplayWindow
         }
     }
 
-    private async Task OpenSessionAsync(bool celebrate = false)
+    private async Task OpenSessionAsync(string? workingDirectory = null, bool celebrate = false)
     {
         if (SkillsBlocked || openingSession || sessionsStopping)
         {
@@ -596,7 +596,18 @@ internal sealed partial class ReplayWindow
         }
         try
         {
-            await assistantSessions.OpenAsync(sessionSettings.WorkingDirectory ?? Environment.CurrentDirectory, sessionCancellation.Token);
+            string resolvedWorkingDirectory =
+                SummonDirectoryDialog.ResolveDefaultDirectory(workingDirectory ?? sessionSettings.WorkingDirectory);
+            await assistantSessions.OpenAsync(resolvedWorkingDirectory, sessionCancellation.Token);
+            try
+            {
+                sessionSettings.RecordWorkingDirectory(resolvedWorkingDirectory);
+            }
+            catch (Exception exception) when (
+                exception is IOException or UnauthorizedAccessException)
+            {
+                ShowSessionError($"Copilot opened, but its directory history could not be saved: {exception.Message}");
+            }
             if (!sessionsStopping)
             {
                 Sparkle();
@@ -643,7 +654,15 @@ internal sealed partial class ReplayWindow
             }
             return;
         }
-        await OpenSessionAsync(celebrate: true);
+        string? workingDirectory = SummonDirectoryDialog.Ask(
+            this,
+            dpiScale,
+            sessionSettings.WorkingDirectory,
+            sessionSettings.RecentWorkingDirectories);
+        if (workingDirectory is not null)
+        {
+            await OpenSessionAsync(workingDirectory, celebrate: true);
+        }
     }
 
     private void StartSessionLaunchJump()
@@ -1426,6 +1445,7 @@ internal sealed class SessionSettings
     public bool CareSystemEnabled { get; set; } = true;
     public bool AmbientQuipsEnabled { get; set; } = true;
     public string? WorkingDirectory { get; set; }
+    public List<string> RecentWorkingDirectories { get; set; } = [];
     public AssistantLaunchCommand? CopilotLaunch { get; set; }
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? CliPath { get; set; }
@@ -1472,5 +1492,20 @@ internal sealed class SessionSettings
     {
         Directory.CreateDirectory(Path.GetDirectoryName(SettingsPath)!);
         File.WriteAllText(SettingsPath, JsonSerializer.Serialize(this, JsonOptions));
+    }
+
+    public void RecordWorkingDirectory(string workingDirectory)
+    {
+        string resolved = Path.GetFullPath(workingDirectory);
+        RecentWorkingDirectories ??= [];
+        RecentWorkingDirectories.RemoveAll(
+            path => string.Equals(path, resolved, StringComparison.OrdinalIgnoreCase));
+        RecentWorkingDirectories.Insert(0, resolved);
+        if (RecentWorkingDirectories.Count > 10)
+        {
+            RecentWorkingDirectories.RemoveRange(10, RecentWorkingDirectories.Count - 10);
+        }
+        WorkingDirectory = resolved;
+        Save();
     }
 }

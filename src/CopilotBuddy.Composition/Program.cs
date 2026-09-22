@@ -1046,7 +1046,7 @@ internal sealed partial class ReplayWindow : Form
         bool occupiedChairHit = HitOccupiedChair(pointer);
         bool presentHit = HitPresent(pointer);
         bool interactionHold = buddyHit || occupiedChairHit || skillMenu.Visible;
-        bool interactive = dragging || supplyPressPending || supplyDragging ||
+        bool interactive = dragging || carriedSupply is not null || supplyPressPending || supplyDragging ||
             presentPressPending || presentDragging || interactionHold || supplyHit || presentHit || exitMenu.Visible;
         int style = GetWindowLong(Handle, -20);
         int updatedStyle = interactive ? style & ~0x20 : style | 0x20;
@@ -1219,7 +1219,7 @@ internal sealed partial class ReplayWindow : Form
             long packed = message.LParam.ToInt64();
             Point screenPoint = new(unchecked((short)packed), unchecked((short)(packed >> 16)));
             Point clientPoint = PointToClient(screenPoint);
-            message.Result = dragging || supplyPressPending || supplyDragging ||
+            message.Result = dragging || carriedSupply is not null || supplyPressPending || supplyDragging ||
                 presentPressPending || presentDragging || HitSprite(clientPoint) ||
                 HitOccupiedChair(clientPoint) || HitSupply(clientPoint) || HitPresent(clientPoint) ? 1 : -1;
             return;

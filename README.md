@@ -114,7 +114,7 @@ bubble, or its notification-area icon.
 
 | Action | Default shortcut | What it does |
 |---|---:|---|
-| Summon | `Alt+Enter` | Focuses the oldest pending session, or opens a new Copilot CLI session |
+| Summon | `Alt+Enter` | Focuses the oldest pending session, or chooses a recent project/directory for a new Copilot CLI session |
 | Buddy Menu | `Alt+Space` | Opens skills, supplies, and settings |
 | Inquire | `Alt+Shift+G` | Injects a structured design-review prompt into the focused managed session |
 | Handoff | `Alt+Shift+H` | Asks the current session to prepare a handoff for a fresh session |
