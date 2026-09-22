@@ -9,11 +9,12 @@ namespace CopilotBuddy.Core;
 
 public static class AssistantBrokerProtocol
 {
-    public const int Version = 13;
-    public const string PipeName = "CopilotBuddy.AssistantBroker.v13";
+    public const int Version = 14;
+    public const string PipeName = "CopilotBuddy.AssistantBroker.v14";
     public const string Request = "request";
     public const string Response = "response";
     public const string Event = "event";
+    public const string Shutdown = "shutdown";
     public const string ConfigureLaunch = "configure-launch";
     public const string Open = "open";
     public const string Focus = "focus";
@@ -176,7 +177,15 @@ public interface IConfigurableAssistantSessions
     Task ConfigureLaunchAsync(AssistantLaunchCommand command, CancellationToken cancellationToken);
 }
 
-public sealed class AssistantSessionBrokerClient : IStoredAssistantSessions, IConfigurableAssistantSessions
+public interface IAssistantBrokerControl
+{
+    Task ShutdownAsync(CancellationToken cancellationToken);
+}
+
+public sealed class AssistantSessionBrokerClient :
+    IStoredAssistantSessions,
+    IConfigurableAssistantSessions,
+    IAssistantBrokerControl
 {
     private readonly NamedPipeClientStream pipe;
     private readonly StreamReader reader;
@@ -374,6 +383,13 @@ public sealed class AssistantSessionBrokerClient : IStoredAssistantSessions, ICo
         CancellationToken cancellationToken) =>
         await RequestAsync<AssistantLaunchCommand, bool>(
             AssistantBrokerProtocol.ConfigureLaunch, command, cancellationToken);
+
+    public async Task ShutdownAsync(CancellationToken cancellationToken)
+    {
+        await RequestAsync<object, bool>(
+            AssistantBrokerProtocol.Shutdown, new(), cancellationToken);
+        await shutdown.CancelAsync();
+    }
 
     public async Task OpenAsync(string workingDirectory, CancellationToken cancellationToken) =>
         await RequestAsync<BrokerOpenRequest, bool>(

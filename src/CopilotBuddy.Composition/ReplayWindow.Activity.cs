@@ -14,18 +14,22 @@ internal sealed partial class ReplayWindow
     private const int PbtApmResumeAutomatic = 0x0012;
     private const int PbtPowerSettingChange = 0x8013;
     private const uint DeviceNotifyWindowHandle = 0;
+    private const uint AwayThresholdMilliseconds = 2 * 60 * 1000;
     private static readonly Guid ConsoleDisplayState =
         new("6FE69556-704A-47A0-8F24-C28D936FDA47");
 
+    private readonly System.Windows.Forms.Timer activityTimer = new() { Interval = 1000 };
     private nint displayStateNotification;
     private bool sessionLocked;
     private bool powerSuspended;
     private bool displayOff;
+    private bool userAway;
 
     private void StartActivityMonitoring()
     {
         SystemEvents.PowerModeChanged += OnPowerModeChanged;
         SystemEvents.SessionSwitch += OnSessionSwitch;
+        activityTimer.Tick += (_, _) => UpdateUserAway();
         displayStateNotification = RegisterPowerSettingNotification(
             Handle,
             in ConsoleDisplayState,
@@ -34,10 +38,14 @@ internal sealed partial class ReplayWindow
         {
             throw new Win32Exception(Marshal.GetLastWin32Error());
         }
+        UpdateUserAway();
+        activityTimer.Start();
     }
 
     private void StopActivityMonitoring()
     {
+        activityTimer.Stop();
+        activityTimer.Dispose();
         SystemEvents.PowerModeChanged -= OnPowerModeChanged;
         SystemEvents.SessionSwitch -= OnSessionSwitch;
         if (displayStateNotification != 0)
@@ -45,6 +53,25 @@ internal sealed partial class ReplayWindow
             UnregisterPowerSettingNotification(displayStateNotification);
             displayStateNotification = 0;
         }
+    }
+
+    private void UpdateUserAway()
+    {
+        LastInputInfo lastInput = new() { Size = (uint)Marshal.SizeOf<LastInputInfo>() };
+        if (!GetLastInputInfo(ref lastInput))
+        {
+            throw new Win32Exception(Marshal.GetLastWin32Error());
+        }
+
+        uint idleMilliseconds = unchecked((uint)Environment.TickCount - lastInput.TickCount);
+        bool away = idleMilliseconds >= AwayThresholdMilliseconds;
+        if (userAway == away)
+        {
+            return;
+        }
+
+        userAway = away;
+        UpdateBuddyActivity();
     }
 
     private void OnPowerModeChanged(object sender, PowerModeChangedEventArgs args)
@@ -149,7 +176,7 @@ internal sealed partial class ReplayWindow
 
     private void UpdateBuddyActivity()
     {
-        bool active = !sessionLocked && !powerSuspended && !displayOff;
+        bool active = !sessionLocked && !powerSuspended && !displayOff && !userAway;
         if (buddyActive == active || controller is null)
         {
             buddyActive = active;
@@ -191,7 +218,10 @@ internal sealed partial class ReplayWindow
         modelTimestamp = Stopwatch.GetTimestamp();
         needsTimestamp = modelTimestamp;
         SetBuddyAnimationsPaused(false);
-        needsTimer.Start();
+        if (sessionSettings.CareSystemEnabled)
+        {
+            needsTimer.Start();
+        }
         presentTimer.Start();
         pointerTimer.Start();
         if (focusingSession)
@@ -253,6 +283,17 @@ internal sealed partial class ReplayWindow
         public int DataLength;
         public byte Data;
     }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct LastInputInfo
+    {
+        public uint Size;
+        public uint TickCount;
+    }
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetLastInputInfo(ref LastInputInfo lastInputInfo);
 
     [DllImport("user32.dll", SetLastError = true)]
     private static extern nint RegisterPowerSettingNotification(

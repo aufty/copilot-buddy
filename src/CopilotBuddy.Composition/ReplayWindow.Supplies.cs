@@ -72,6 +72,9 @@ internal sealed partial class ReplayWindow
             BuddyNeed.Play => "I want to play!",
             _ => null
         };
+    private bool HasNeedMessageAction =>
+        VisibleNeedRequest is not null &&
+        string.Equals(controller?.Message, NeedRequestMessage, StringComparison.Ordinal);
     private string? SupplyMessage => supplyFeedbackMessage ?? NeedRequestMessage;
 
     private void StartNeedsHost()

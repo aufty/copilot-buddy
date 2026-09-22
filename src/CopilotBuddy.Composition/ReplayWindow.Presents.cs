@@ -177,6 +177,12 @@ internal sealed partial class ReplayWindow
         {
             return;
         }
+        if (TaskbarMode && taskbarLayer?.IsVisible == false)
+        {
+            presentBubbleTarget = null;
+            presentBubble.Hide();
+            return;
+        }
         ArtifactPresent? previousTarget = presentBubbleTarget;
         Point pointer = PointToClient(Cursor.Position);
         StoredPresent? stored = storedPresents.Values.LastOrDefault(entry =>

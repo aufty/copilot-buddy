@@ -199,7 +199,8 @@ Useful diagnostic modes include:
 - `--windowed` - runs Buddy in a normal framed window;
 - `--smoke` - performs a bounded rendering smoke check;
 - `--interaction-smoke` - exercises drag, release, re-grab, and landing; and
-- `--trace-drag` - writes drag traces under `%TEMP%\CopilotBuddy\drag-traces`.
+- Buddy keeps the latest 20 pointer interactions under
+  `%LOCALAPPDATA%\CopilotBuddy\diagnostics\drag-traces` for troubleshooting intermittent drag issues.
 
 ### Custom sprites
 

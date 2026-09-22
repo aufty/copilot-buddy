@@ -8,7 +8,7 @@ public static class CopilotSessionBrokerHost
 {
     public static async Task RunAsync(CancellationToken cancellationToken = default)
     {
-        using Mutex instance = new(true, "Local\\CopilotBuddy.AssistantBroker.v13", out bool firstInstance);
+        using Mutex instance = new(true, "Local\\CopilotBuddy.AssistantBroker.v14", out bool firstInstance);
         if (!firstInstance)
         {
             return;
@@ -108,6 +108,10 @@ public static class CopilotSessionBrokerHost
                     }
                     AssistantBrokerMessage response = await HandleRequestAsync(request, cancellationToken);
                     await connection.SendAsync(response, cancellationToken);
+                    if (request.Name == AssistantBrokerProtocol.Shutdown && response.Success)
+                    {
+                        Environment.Exit(0);
+                    }
                 }
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
@@ -134,6 +138,7 @@ public static class CopilotSessionBrokerHost
             {
                 object? result = request.Name switch
                 {
+                    AssistantBrokerProtocol.Shutdown => true,
                     AssistantBrokerProtocol.ConfigureLaunch => ConfigureLaunch(
                         Deserialize<AssistantLaunchCommand>(request)),
                     AssistantBrokerProtocol.Open => await OpenAsync(

@@ -6,6 +6,25 @@ namespace CopilotBuddy.Core.Tests;
 public sealed class PipeProtocolTests
 {
     [Fact]
+    public void AssistantBrokerMessagesRoundTripShutdownRequests()
+    {
+        AssistantBrokerMessage message = new(
+            AssistantBrokerProtocol.Version,
+            AssistantBrokerProtocol.Request,
+            Guid.NewGuid(),
+            AssistantBrokerProtocol.Shutdown,
+            Payload: JsonSerializer.SerializeToElement(new { }, PipeProtocol.JsonOptions));
+
+        string json = JsonSerializer.Serialize(message, PipeProtocol.JsonOptions);
+        AssistantBrokerMessage restored = JsonSerializer.Deserialize<AssistantBrokerMessage>(
+            json, PipeProtocol.JsonOptions)!;
+
+        Assert.Equal(message.Id, restored.Id);
+        Assert.Equal(AssistantBrokerProtocol.Shutdown, restored.Name);
+        Assert.Equal(AssistantBrokerProtocol.Version, restored.Version);
+    }
+
+    [Fact]
     public void AssistantBrokerMessagesRoundTripHandoffRequests()
     {
         BrokerStartHandoffRequest payload = new(

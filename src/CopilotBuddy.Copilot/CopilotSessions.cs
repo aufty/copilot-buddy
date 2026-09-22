@@ -485,7 +485,7 @@ public sealed class CopilotSessions : IAssistantSessions
 
         int columns = (int)Math.Ceiling(Math.Sqrt(windows.Count));
         int rows = (int)Math.Ceiling((double)windows.Count / columns);
-        const uint noActivateOrZOrder = 0x0010 | 0x0004 | 0x0200;
+        const uint noActivate = 0x0010 | 0x0200;
         AssistantWindowBounds[] tiledBounds = new AssistantWindowBounds[windows.Count];
         for (int index = 0; index < windows.Count; index++)
         {
@@ -501,7 +501,7 @@ public sealed class CopilotSessions : IAssistantSessions
             int right = workArea.Left + (column + 1) * workArea.Width / columns;
             int top = workArea.Top + row * workArea.Height / rows;
             int bottom = workArea.Top + (row + 1) * workArea.Height / rows;
-            if (!SetWindowPos(window, 0, left, top, right - left, bottom - top, noActivateOrZOrder))
+            if (!SetWindowPos(window, 0, left, top, right - left, bottom - top, noActivate))
             {
                 throw new Win32Exception(Marshal.GetLastWin32Error(), "Could not tile a managed terminal window.");
             }

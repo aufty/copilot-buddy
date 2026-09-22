@@ -71,7 +71,7 @@ public sealed class PhysicsOptions
 {
     public double DragResponseSeconds { get; init; } = 0.12;
     public double Gravity { get; init; } = 1_600;
-    public double MaximumReleaseSpeed { get; init; } = 1_100;
+    public double MaximumReleaseSpeed { get; init; } = 2_200;
     public double WallRestitution { get; init; } = 0.4;
     public double LandingDurationSeconds { get; init; } = 0.38;
     public double MaximumLandingSquish { get; init; } = 0.22;

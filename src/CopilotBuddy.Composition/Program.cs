@@ -88,7 +88,6 @@ internal sealed partial class ReplayWindow : Form
     private float smokeSettleDistance;
     private int smokeSettleSubmissions;
     private bool injectingInput;
-    private readonly bool traceDrag = Environment.GetCommandLineArgs().Contains("--trace-drag");
     private List<DragTraceSample>? dragTrace;
     private long dragTraceStarted;
     private int dragAnimationSubmissions;
@@ -99,6 +98,7 @@ internal sealed partial class ReplayWindow : Form
     private PassiveMotionPlan? activePassiveMotion;
     private readonly System.Windows.Forms.Timer pointerTimer = new() { Interval = 20 };
     private readonly ContextMenuStrip exitMenu = new();
+    private readonly ToolStripMenuItem exitMenuItem = new("Exit");
     private readonly Icon taskbarIcon;
     private NotifyIcon? trayIcon;
     private bool hovered;
@@ -159,7 +159,33 @@ internal sealed partial class ReplayWindow : Form
         pointerTimer.Tick += (_, _) => UpdatePointerRouting();
         DpiChanged += (_, _) => QueuePlacementRefresh();
         AddPresentationMenu();
-        exitMenu.Items.Add("Exit", null, (_, _) => Close());
+        exitMenuItem.Click += async (_, _) => await ExitFromMenuAsync();
+        exitMenu.Items.Add(exitMenuItem);
+    }
+
+    private async Task ExitFromMenuAsync()
+    {
+        exitMenuItem.Enabled = false;
+        try
+        {
+            if (assistantSessions is IAssistantBrokerControl broker)
+            {
+                using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(5));
+                await broker.ShutdownAsync(timeout.Token);
+            }
+            Close();
+        }
+        catch (Exception exception) when (
+            exception is IOException or InvalidOperationException or OperationCanceledException)
+        {
+            exitMenuItem.Enabled = true;
+            MessageBox.Show(
+                this,
+                $"Copilot Buddy could not stop its assistant broker and will remain open.\n\n{exception.Message}",
+                "Copilot Buddy",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Error);
+        }
     }
 
     protected override bool ShowWithoutActivation => TaskbarMode;
@@ -185,6 +211,7 @@ internal sealed partial class ReplayWindow : Form
         if (TaskbarMode)
         {
             taskbarLayer = new TaskbarLayerController(Handle);
+            taskbarLayer.VisibilityChanged += OnBuddyLayerVisibilityChanged;
             taskbarLayer.Start();
         }
         if (TaskbarMode && !SetLayeredWindowAttributes(Handle, 0, 255, 0x2))
@@ -675,7 +702,9 @@ internal sealed partial class ReplayWindow : Form
             BeginPresentPress(args.Location);
             return;
         }
-        if (!HitSprite(args.Location) && !HitOccupiedChair(args.Location))
+        bool spriteHit = HitSprite(args.Location);
+        bool chairHit = HitOccupiedChair(args.Location);
+        if (!spriteHit && !chairHit)
         {
             return;
         }
@@ -688,6 +717,7 @@ internal sealed partial class ReplayWindow : Form
         {
             return;
         }
+        StartDragTrace(args.Location, spriteHit, chairHit);
         if (attentionBounce is not null && !interactionSmoke)
         {
             dragStart = args.Location;
@@ -718,11 +748,22 @@ internal sealed partial class ReplayWindow : Form
         }
         Vector3? bouncePosition = attentionBounce is not null ? bubblePosition?.Position : null;
         StopAttentionBounce();
-        passiveTimer.Stop();
+        if (activePassiveMotion is not null)
+        {
+            InterruptPassiveMotion();
+        }
+        else
+        {
+            passiveTimer.Stop();
+        }
         if (releasingDrag)
         {
+            Vector3 renderedPosition = CurrentRenderedBuddyOffset();
+            controller!.SetExternalFlightPose(
+                renderedPosition.X / dpiScale,
+                baseline - renderedPosition.Y / dpiScale);
             sprite!.StopAnimation(nameof(sprite.Offset));
-            sprite.Offset = PositionOf(controller!.Snapshot);
+            sprite.Offset = renderedPosition;
             nativeMovingRetargets += nativeDrag!.MovingRetargets;
             nativeDrag.Dispose();
             nativeDrag = null;
@@ -730,12 +771,9 @@ internal sealed partial class ReplayWindow : Form
             RecordDragTrace("flight-regrabbed");
             SaveDragTrace();
         }
-        if (traceDrag)
+        if (dragTrace is null)
         {
-            dragTrace = new List<DragTraceSample>(4096);
-            dragTraceStarted = Stopwatch.GetTimestamp();
-            dragAnimationSubmissions = 0;
-            dragTraceDropped = 0;
+            StartDragTrace(point, spriteHit: true, chairHit: seated);
         }
         controller!.BeginDrag(point.X / dpiScale, baseline - point.Y / dpiScale);
         if (bouncePosition is { } position)
@@ -861,6 +899,8 @@ internal sealed partial class ReplayWindow : Form
             {
                 attentionPressPending = false;
                 Capture = false;
+                RecordDragTrace("attention-click");
+                SaveDragTrace();
                 controller!.RequestAction();
                 return;
             }
@@ -1053,9 +1093,29 @@ internal sealed partial class ReplayWindow : Form
             return;
         }
         Point pointer = PointToClient(Cursor.Position);
+        Vector3 rendered = CurrentRenderedBuddyOffset();
+        Vector3 spriteOffset = CurrentSpriteOffset();
         dragTrace.Add(new DragTraceSample(Stopwatch.GetElapsedTime(dragTraceStarted).TotalMilliseconds,
             eventName, pointer.X, pointer.Y, pendingPointer.X, pendingPointer.Y,
-            Capture, hovered, dragAnimationSubmissions, controller.Snapshot));
+            Capture, hovered, dragging, releasingDrag, dragMoved, dragAnimationSubmissions,
+            rendered.X, rendered.Y, spriteOffset.X, spriteOffset.Y,
+            dragTarget.X, dragTarget.Y, grabOffset.X, grabOffset.Y,
+            activePassiveMotion is not null, attentionBounce is not null, supplyRetrieval is not null,
+            chairHop is not null, seated, nativeDrag is not null, controller.Snapshot));
+    }
+
+    private void StartDragTrace(Point point, bool spriteHit, bool chairHit)
+    {
+        if (dragTrace is not null)
+        {
+            SaveDragTrace();
+        }
+        dragTrace = new List<DragTraceSample>(4096);
+        dragTraceStarted = Stopwatch.GetTimestamp();
+        dragAnimationSubmissions = 0;
+        dragTraceDropped = 0;
+        pendingPointer = point;
+        RecordDragTrace(spriteHit ? "mouse-down-sprite" : chairHit ? "mouse-down-chair" : "mouse-down");
     }
 
     private void SaveDragTrace()
@@ -1067,9 +1127,12 @@ internal sealed partial class ReplayWindow : Form
         DragTraceSample[] samples = dragTrace.ToArray();
         int dropped = dragTraceDropped;
         dragTrace = null;
-        string directory = Path.Combine(Path.GetTempPath(), "CopilotBuddy", "drag-traces");
+        string directory = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "CopilotBuddy", "diagnostics", "drag-traces");
         string path = Path.Combine(directory, $"drag-{DateTime.UtcNow:yyyyMMdd-HHmmss-fffffff}-{Environment.ProcessId}.json");
-        var report = new { ProcessId = Environment.ProcessId, DpiScale = dpiScale, BaselineDip = baseline,
+        var report = new { CreatedAtUtc = DateTime.UtcNow, ProcessId = Environment.ProcessId,
+            DpiScale = dpiScale, BaselineDip = baseline,
             BorderMode = root?.BorderMode.ToString(), DroppedSamples = dropped, Samples = samples };
         BeginInvoke(() =>
         {
@@ -1077,6 +1140,12 @@ internal sealed partial class ReplayWindow : Form
             {
                 Directory.CreateDirectory(directory);
                 File.WriteAllText(path, JsonSerializer.Serialize(report));
+                foreach (FileInfo stale in new DirectoryInfo(directory).GetFiles("drag-*.json")
+                    .OrderByDescending(file => file.CreationTimeUtc)
+                    .Skip(20))
+                {
+                    stale.Delete();
+                }
             }
             catch (IOException exception)
             {
@@ -1090,7 +1159,11 @@ internal sealed partial class ReplayWindow : Form
     }
 
     private sealed record DragTraceSample(double TimeMs, string Event, int CursorX, int CursorY,
-        int PendingX, int PendingY, bool Captured, bool Hovered, int AnimationSubmissions, PresentationSnapshot Model);
+        int PendingX, int PendingY, bool Captured, bool Hovered, bool Dragging, bool Releasing,
+        bool DragMoved, int AnimationSubmissions, float RenderedX, float RenderedY,
+        float SpriteX, float SpriteY, float TargetX, float TargetY, float GrabOffsetX,
+        float GrabOffsetY, bool PassiveMotion, bool AttentionBounce, bool SupplyRetrieval,
+        bool ChairHop, bool Seated, bool HasNativeDrag, PresentationSnapshot Model);
 
     protected override void WndProc(ref Message message)
     {

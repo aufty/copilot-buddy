@@ -30,7 +30,7 @@ internal sealed partial class ReplayWindow
         bubble = new MessageBubble(presentation.Bubble);
         bubble.MouseClick += (_, args) =>
         {
-            if (args.Button == MouseButtons.Left && HasSessionAction)
+            if (args.Button == MouseButtons.Left && (HasSessionAction || HasNeedMessageAction))
             {
                 OnActionRequested(bubble, EventArgs.Empty);
             }
@@ -337,8 +337,13 @@ internal sealed partial class ReplayWindow
         {
             return;
         }
+        if (TaskbarMode && taskbarLayer?.IsVisible == false)
+        {
+            bubble.Hide();
+            return;
+        }
         PresentationSnapshot snapshot = controller!.Snapshot;
-        bubble.IsInteractive = HasSessionAction;
+        bubble.IsInteractive = HasSessionAction || HasNeedMessageAction;
         string? message = snapshot.Message ?? ambientQuip;
         if (!snapshot.IsVisible || message is null)
         {
@@ -353,6 +358,21 @@ internal sealed partial class ReplayWindow
             (int)(position.Y + spriteHeight * (1 - snapshot.ScaleY) * dpiScale)));
         bubble.Present(this, message, anchor, RectangleToScreen(ClientRectangle), dpiScale,
             ambient ? MessageBubbleStyle.Ambient : MessageBubbleStyle.Default);
+    }
+
+    private void OnBuddyLayerVisibilityChanged(object? sender, bool visible)
+    {
+        if (!visible)
+        {
+            bubble?.Hide();
+            presentBubble?.Hide();
+            return;
+        }
+        if (controller is not null)
+        {
+            UpdateBubble();
+            UpdatePresentBubble();
+        }
     }
 
     private sealed class BubblePositionObserver : IInteractionTrackerOwner, IDisposable

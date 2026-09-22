@@ -112,8 +112,24 @@ internal sealed class MessageBubble : Form
         args.Graphics.SmoothingMode = SmoothingMode.None;
         float bodyHeight = Height - pointerHeight - 1;
         float radius = Math.Max(1, Math.Min(6 * scale, Math.Min(Width, bodyHeight) / 2 - 1));
+        RectangleF body = new(1, 1, Math.Max(1, Width - 3), Math.Max(1, bodyHeight - 2));
+        float diameter = radius * 2;
+        float pointerLeft = pointerX - 8 * scale;
+        float pointerRight = pointerX + 8 * scale;
         using GraphicsPath outline = new();
-        outline.AddRoundedRectangle(new RectangleF(1, 1, Math.Max(1, Width - 3), Math.Max(1, bodyHeight - 2)), new SizeF(radius, radius));
+        outline.StartFigure();
+        outline.AddArc(body.Left, body.Top, diameter, diameter, 180, 90);
+        outline.AddLine(body.Left + radius, body.Top, body.Right - radius, body.Top);
+        outline.AddArc(body.Right - diameter, body.Top, diameter, diameter, 270, 90);
+        outline.AddLine(body.Right, body.Top + radius, body.Right, body.Bottom - radius);
+        outline.AddArc(body.Right - diameter, body.Bottom - diameter, diameter, diameter, 0, 90);
+        outline.AddLine(body.Right - radius, body.Bottom, pointerRight, body.Bottom);
+        outline.AddLine(pointerRight, body.Bottom, pointerX, Height - 1);
+        outline.AddLine(pointerX, Height - 1, pointerLeft, body.Bottom);
+        outline.AddLine(pointerLeft, body.Bottom, body.Left + radius, body.Bottom);
+        outline.AddArc(body.Left, body.Bottom - diameter, diameter, diameter, 90, 90);
+        outline.AddLine(body.Left, body.Bottom - radius, body.Left, body.Top + radius);
+        outline.CloseFigure();
         bool ambient = style == MessageBubbleStyle.Ambient;
         using SolidBrush background = new(ambient
             ? Color.FromArgb(74, 73, 80)
@@ -123,9 +139,6 @@ internal sealed class MessageBubble : Form
             : Color.FromArgb(42, 40, 37), Math.Max(1, 2 * scale));
         args.Graphics.FillPath(background, outline);
         args.Graphics.DrawPath(border, outline);
-        PointF[] pointer = [new(pointerX - 8 * scale, bodyHeight - scale), new(pointerX, Height - 1), new(pointerX + 8 * scale, bodyHeight - scale)];
-        args.Graphics.FillPolygon(background, pointer);
-        args.Graphics.DrawLines(border, pointer);
         TextRenderer.DrawText(args.Graphics, message, messageFont, textBounds,
             ambient ? Color.FromArgb(235, 232, 226) : Color.FromArgb(31, 29, 26), TextFlags);
     }

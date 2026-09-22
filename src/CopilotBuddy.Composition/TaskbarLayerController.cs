@@ -28,6 +28,10 @@ internal sealed class TaskbarLayerController : IDisposable
     private int refreshQueued;
     private bool disposed;
 
+    internal event EventHandler<bool>? VisibilityChanged;
+
+    internal bool IsVisible => elevated != false;
+
     internal TaskbarLayerController(nint window)
     {
         this.window = window;
@@ -64,7 +68,8 @@ internal sealed class TaskbarLayerController : IDisposable
     {
         nint currentTaskbar = TaskbarPlacement.GetPrimaryTaskbarWindow();
         bool shouldElevate = currentTaskbar != 0 && !FullscreenWindowCoversPrimaryTaskbar(currentTaskbar);
-        if (elevated == shouldElevate && taskbar == currentTaskbar)
+        bool visibilityChanged = elevated != shouldElevate;
+        if (!visibilityChanged && taskbar == currentTaskbar)
         {
             return;
         }
@@ -87,6 +92,10 @@ internal sealed class TaskbarLayerController : IDisposable
             throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
         }
         elevated = shouldElevate;
+        if (visibilityChanged)
+        {
+            VisibilityChanged?.Invoke(this, shouldElevate);
+        }
     }
 
     private nint RegisterHook(uint eventType)
