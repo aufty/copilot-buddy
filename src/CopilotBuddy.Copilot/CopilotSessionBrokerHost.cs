@@ -8,7 +8,7 @@ public static class CopilotSessionBrokerHost
 {
     public static async Task RunAsync(CancellationToken cancellationToken = default)
     {
-        using Mutex instance = new(true, "Local\\CopilotBuddy.AssistantBroker.v14", out bool firstInstance);
+        using Mutex instance = new(true, "Local\\CopilotBuddy.AssistantBroker.v15", out bool firstInstance);
         if (!firstInstance)
         {
             return;

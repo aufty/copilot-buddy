@@ -179,7 +179,6 @@ public sealed class CopilotSessions : IAssistantSessions
         try
         {
             RecordAttachment(terminal, stage);
-            Stopwatch connecting = Stopwatch.StartNew();
             while (!terminal.Process.HasExited)
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -198,15 +197,25 @@ public sealed class CopilotSessions : IAssistantSessions
                     RecordAttachment(terminal, stage);
                     break;
                 }
-                catch (SocketException exception) when (exception.SocketErrorCode == SocketError.ConnectionRefused)
+                catch (SocketException exception) when (
+                    exception.SocketErrorCode == SocketError.ConnectionRefused)
                 {
                     RecordAttachment(terminal, stage, exception);
                     await DisconnectAsync(candidate);
                     terminal.Client = null;
-                    if (connecting.Elapsed > TimeSpan.FromSeconds(10))
-                    {
-                        throw new IOException($"Could not attach to the CLI: {exception.GetBaseException().Message}", exception);
-                    }
+                }
+                catch (TimeoutException exception)
+                {
+                    RecordAttachment(terminal, stage, exception);
+                    await DisconnectAsync(candidate);
+                    terminal.Client = null;
+                }
+                catch (OperationCanceledException exception) when (
+                    !cancellationToken.IsCancellationRequested)
+                {
+                    RecordAttachment(terminal, stage, exception);
+                    await DisconnectAsync(candidate);
+                    terminal.Client = null;
                 }
                 await Task.Delay(500, cancellationToken);
             }
@@ -245,12 +254,38 @@ public sealed class CopilotSessions : IAssistantSessions
             {
                 terminal.Discovered.Enqueue(expectedSessionId);
             }
+            bool foregroundRetrying = false;
             while (!terminal.Process.HasExited)
             {
                 using CancellationTokenSource request = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
                 request.CancelAfter(TimeSpan.FromSeconds(5));
                 stage = "foreground";
-                string? foreground = await client.GetForegroundSessionIdAsync(request.Token).WaitAsync(TimeSpan.FromSeconds(5), cancellationToken);
+                string? foreground;
+                try
+                {
+                    foreground = await client.GetForegroundSessionIdAsync(request.Token)
+                        .WaitAsync(TimeSpan.FromSeconds(5), cancellationToken);
+                    if (foregroundRetrying)
+                    {
+                        foregroundRetrying = false;
+                        RecordAttachment(terminal, "attached");
+                    }
+                }
+                catch (TimeoutException exception)
+                {
+                    foregroundRetrying = true;
+                    RecordAttachment(terminal, stage, exception);
+                    await Task.Delay(750, cancellationToken);
+                    continue;
+                }
+                catch (OperationCanceledException exception) when (
+                    !cancellationToken.IsCancellationRequested)
+                {
+                    foregroundRetrying = true;
+                    RecordAttachment(terminal, stage, exception);
+                    await Task.Delay(750, cancellationToken);
+                    continue;
+                }
                 if (foreground is not null)
                 {
                     terminal.ForegroundSessionId = foreground;

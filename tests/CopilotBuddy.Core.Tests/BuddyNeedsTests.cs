@@ -44,6 +44,20 @@ public sealed class BuddyNeedsTests
         Assert.True(needs.Relationship < relationship);
     }
 
+    [Theory]
+    [InlineData(BuddyNeed.Food)]
+    [InlineData(BuddyNeed.Water)]
+    [InlineData(BuddyNeed.Play)]
+    public void ASpecificNeedCanBeRequested(BuddyNeed need)
+    {
+        BuddyNeedsController needs = CreateNeeds(new SequenceRandomSource(0, 0, 0));
+
+        needs.Request(need);
+
+        Assert.Equal(need, needs.CurrentRequest);
+        Assert.Equal(0.5, needs.Level(need));
+    }
+
     [Fact]
     public void SatisfyingAllRestoresEveryNeedAndClearsTheRequest()
     {

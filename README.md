@@ -191,7 +191,12 @@ dotnet run --project .\src\CopilotBuddy.Cli -- show "Build needs your approval"
 dotnet run --project .\src\CopilotBuddy.Cli -- dismiss
 dotnet run --project .\src\CopilotBuddy.Cli -- visible off
 dotnet run --project .\src\CopilotBuddy.Cli -- visible on
-dotnet run --project .\src\CopilotBuddy.Cli -- quip
+dotnet run --project .\src\CopilotBuddy.Cli -- demo quip
+dotnet run --project .\src\CopilotBuddy.Cli -- demo heavy-context on
+dotnet run --project .\src\CopilotBuddy.Cli -- demo heavy-context off
+dotnet run --project .\src\CopilotBuddy.Cli -- demo hungry
+dotnet run --project .\src\CopilotBuddy.Cli -- demo thirsty
+dotnet run --project .\src\CopilotBuddy.Cli -- demo play
 ```
 
 Useful diagnostic modes include:

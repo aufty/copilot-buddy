@@ -101,6 +101,12 @@ public sealed class BuddyNeedsController
         }
     }
 
+    public void Request(BuddyNeed need)
+    {
+        needs[need].Level = Math.Min(needs[need].Level, options.RequestThreshold);
+        CurrentRequest = need;
+    }
+
     public void SatisfyAll()
     {
         foreach (NeedState state in needs.Values)

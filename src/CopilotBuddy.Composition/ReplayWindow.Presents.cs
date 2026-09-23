@@ -40,7 +40,7 @@ internal sealed partial class ReplayWindow
     {
         ClearHandoffPresent();
         pendingHandoff = handoff;
-        PresentationSnapshot snapshot = controller!.Snapshot;
+        double buddyX = CurrentRenderedBuddyOffset().X / dpiScale;
         handoffPresent = new ArtifactPresent(
             compositor!,
             root!,
@@ -49,7 +49,7 @@ internal sealed partial class ReplayWindow
             handoff.SourceLabel,
             dpiScale,
             ClientSize,
-            snapshot.X,
+            buddyX,
             spriteWidth,
             presentation.Attention.ReducedMotion);
         handoffPresent.Opened += OnPresentOpened;
@@ -86,7 +86,7 @@ internal sealed partial class ReplayWindow
         {
             return;
         }
-        PresentationSnapshot snapshot = controller!.Snapshot;
+        double buddyX = CurrentRenderedBuddyOffset().X / dpiScale;
         ArtifactPresent present = new(
             compositor!,
             root!,
@@ -95,7 +95,7 @@ internal sealed partial class ReplayWindow
             storedSession.Label,
             dpiScale,
             ClientSize,
-            snapshot.X,
+            buddyX,
             spriteWidth,
             presentation.Attention.ReducedMotion,
             readyInitially: true);

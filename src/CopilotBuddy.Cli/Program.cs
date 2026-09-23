@@ -67,10 +67,30 @@ internal static class BuddyCli
 			request = new(PipeProtocol.Version, PipeProtocol.Visible, Visible: value == "on");
 			return true;
 		}
-		if (args is ["quip"])
+		if (args is ["quip"] or ["demo", "quip"])
 		{
 			request = new(PipeProtocol.Version, PipeProtocol.Quip);
 			return true;
+		}
+		if (args is ["demo", "heavy-context", var enabled] && (enabled == "on" || enabled == "off"))
+		{
+			request = new(PipeProtocol.Version, PipeProtocol.DemoHeavyContext, Enabled: enabled == "on");
+			return true;
+		}
+		if (args is ["demo", var needName])
+		{
+			BuddyNeed? need = needName switch
+			{
+				"hungry" => BuddyNeed.Food,
+				"thirsty" => BuddyNeed.Water,
+				"play" => BuddyNeed.Play,
+				_ => null
+			};
+			if (need is not null)
+			{
+				request = new(PipeProtocol.Version, PipeProtocol.DemoNeed, Need: need);
+				return true;
+			}
 		}
 		error = "Invalid command.";
 		return false;
@@ -82,6 +102,8 @@ internal static class BuddyCli
 		Console.Error.WriteLine("  copilot-buddyctl show \"Build needs your approval\"");
 		Console.Error.WriteLine("  copilot-buddyctl dismiss");
 		Console.Error.WriteLine("  copilot-buddyctl visible on|off");
-		Console.Error.WriteLine("  copilot-buddyctl quip");
+		Console.Error.WriteLine("  copilot-buddyctl demo quip");
+		Console.Error.WriteLine("  copilot-buddyctl demo heavy-context on|off");
+		Console.Error.WriteLine("  copilot-buddyctl demo hungry|thirsty|play");
 	}
 }

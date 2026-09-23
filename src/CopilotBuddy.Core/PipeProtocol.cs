@@ -11,6 +11,8 @@ public static class PipeProtocol
     public const string Dismiss = "dismiss";
     public const string Visible = "visible";
     public const string Quip = "quip";
+    public const string DemoHeavyContext = "demo-heavy-context";
+    public const string DemoNeed = "demo-need";
 
     public static JsonSerializerOptions JsonOptions { get; } = new()
     {
@@ -20,5 +22,11 @@ public static class PipeProtocol
     };
 }
 
-public sealed record PresentationRequest(int Version, string Command, string? Text = null, bool? Visible = null);
+public sealed record PresentationRequest(
+    int Version,
+    string Command,
+    string? Text = null,
+    bool? Visible = null,
+    bool? Enabled = null,
+    BuddyNeed? Need = null);
 public sealed record PresentationResponse(int Version, bool Success, string? Error = null);

@@ -8,6 +8,7 @@ namespace CopilotBuddy.Composition;
 
 internal sealed partial class ReplayWindow
 {
+    private const string HeavyContextDemoSessionId = "copilot-buddy-demo-heavy-context";
     private string DemoMessage =>
         $"Hello! Press {sessionSettings.Shortcuts.SkillMenu} to see what I can do!";
     private readonly CancellationTokenSource pipeCancellation = new();
@@ -82,6 +83,10 @@ internal sealed partial class ReplayWindow
                 PipeProtocol.Show or PipeProtocol.Dismiss or PipeProtocol.Quip => null,
                 PipeProtocol.Visible when request.Visible is null => "The visible command requires a boolean value.",
                 PipeProtocol.Visible => null,
+                PipeProtocol.DemoHeavyContext when request.Enabled is null => "The heavy-context demo command requires a boolean value.",
+                PipeProtocol.DemoHeavyContext => null,
+                PipeProtocol.DemoNeed when request.Need is null => "The need demo command requires a need.",
+                PipeProtocol.DemoNeed => null,
                 _ => $"Unknown presentation command '{request.Command}'."
             };
         if (error is not null)
@@ -103,6 +108,31 @@ internal sealed partial class ReplayWindow
                     break;
                 case PipeProtocol.Quip:
                     TriggerAmbientQuip();
+                    break;
+                case PipeProtocol.DemoHeavyContext:
+                    ChangeContextPressure(() =>
+                    {
+                        if (request.Enabled!.Value)
+                        {
+                            contextPressure.Update(new SessionContextUsage(
+                                HeavyContextDemoSessionId,
+                                "Demo",
+                                ContextPressure.TokenThreshold,
+                                ContextPressure.TokenThreshold * 2));
+                        }
+                        else
+                        {
+                            contextPressure.Remove(HeavyContextDemoSessionId);
+                        }
+                    });
+                    break;
+                case PipeProtocol.DemoNeed:
+                    buddyNeeds.SatisfyAll();
+                    buddyNeeds.Request(request.Need!.Value);
+                    snoozedNeedRequest = null;
+                    needMessageSnoozeUntil = 0;
+                    displayedNeedRequest = request.Need;
+                    RefreshAttention();
                     break;
             }
         }, pipeCancellation.Token);
